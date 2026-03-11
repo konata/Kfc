@@ -1,0 +1,14 @@
+.gradle/
+build/
+*.class
+*.jar
+*.log
+
+node_modules/
+bun.lock
+
+.idea/
+*.iml
+.DS_Store
+
+.cursor/
