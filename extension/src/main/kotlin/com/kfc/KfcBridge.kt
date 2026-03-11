@@ -1,21 +1,17 @@
 package com.kfc
 
 import com.kfc.handlers.*
-import com.pnfsoftware.jeb.core.IEnginesContext
-import com.pnfsoftware.jeb.core.IRuntimeProject
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
 
 class KfcBridge(
-    private val enginesContext: IEnginesContext,
-    private val project: IRuntimeProject,
+    private val ctx: KfcContext,
     private val port: Int,
 ) {
     private lateinit var server: HttpServer
 
     fun start() {
-        val ctx = KfcContext(enginesContext, project)
 
         server = HttpServer.create(InetSocketAddress(port), 0)
 
@@ -35,6 +31,9 @@ class KfcBridge(
         server.createContext("/api/strings") { handle(it) { SearchHandler.searchStrings(ctx, it.queryParams) } }
         server.createContext("/api/method/cfg") { handle(it) { CodeHandler.methodCfg(ctx, it.queryParams) } }
         server.createContext("/api/bytecode/search") { handle(it) { BytecodeSearchHandler.search(ctx, it.queryParams) } }
+
+        // Load
+        server.createContext("/api/load") { handle(it) { ctx.loadProject(it.queryParams["path"] ?: "") } }
 
         // Rename
         server.createContext("/api/rename") { handle(it) { RenameHandler.rename(ctx, it.queryParams) } }

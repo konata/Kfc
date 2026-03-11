@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-const KFC_API = process.env.KFC_API_HOST ?? "http://localhost:8199";
+const KFC_API = process.env.KFC_API_HOST ?? "http://localhost:9527";
 
 async function jeb(path: string, params?: Record<string, string>): Promise<string> {
   const url = new URL(path, KFC_API);
@@ -29,6 +29,17 @@ const server = new McpServer({
   name: "kfc",
   version: "0.1.0",
 });
+
+// ---- Load ----
+
+server.tool(
+  "load_apk",
+  "Load an APK/DEX file into JEB for analysis. Can be called at any time to switch targets.",
+  {
+    path: z.string().describe("Absolute path to the APK or DEX file on the server machine"),
+  },
+  async ({ path }) => text(await jeb("/api/load", { path })),
+);
 
 // ---- Meta tools ----
 

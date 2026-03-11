@@ -7,8 +7,13 @@ import kotlinx.serialization.json.*
 object MetaHandler {
 
     fun projectInfo(ctx: KfcContext): String {
-        val prj = ctx.project
+        val prj = ctx.project ?: return buildJsonObject {
+            put("loaded", false)
+            put("message", "No project loaded. Use load_apk first.")
+        }.toString()
         return buildJsonObject {
+            put("loaded", true)
+            ctx.loadedPath?.let { put("path", it) }
             put("project_name", prj.name)
             put("apk_detected", ctx.apkUnit != null)
             put("dex_count", ctx.dexUnits.size)

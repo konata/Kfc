@@ -22,7 +22,7 @@ cd server && bun install
 2. Add a shell alias:
 
 ```bash
-kfc() { /path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kfc.py -- "$(realpath "$1")"; }
+kfc() { /path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kfc.py; }
 ```
 
 3. Configure MCP in your AI client:
@@ -34,7 +34,7 @@ kfc() { /path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kf
     "kfc": {
       "command": "bun",
       "args": ["/path/to/kfc/server/src/index.ts"],
-      "env": { "KFC_API_HOST": "http://localhost:8199" }
+      "env": { "KFC_API_HOST": "http://localhost:9527" }
     }
   }
 }
@@ -45,17 +45,18 @@ kfc() { /path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kf
 claude mcp add kfc -- bun /path/to/kfc/server/src/index.ts
 ```
 
-4. Start analyzing:
+4. Start the bridge, then let AI load the target:
 
 ```bash
-kfc /path/to/target.apk
+kfc
 ```
 
 ## Tools
 
 | Tool | Description |
 |---|---|
-| `get_project_info` | Project overview |
+| `load_apk` | Load or switch APK/DEX for analysis |
+| `get_project_info` | Project overview and current target |
 | `get_manifest` | AndroidManifest.xml |
 | `get_permissions` | Declared permissions |
 | `get_components` | Activities, services, receivers, providers |

@@ -12,23 +12,15 @@ class KfcExtension : IScript {
             return
         }
 
-        val projects = engCtx.projects
-        if (projects.isNullOrEmpty()) {
-            println("[kfc] ERROR: No project loaded. Pass an APK/DEX as argument.")
-            return
-        }
+        val port = System.getProperty("kfc.port", "9527").toIntOrNull() ?: 9527
+        val kfcCtx = KfcContext(engCtx)
 
-        val port = System.getProperty("kfc.port", "8199").toIntOrNull() ?: 8199
-        val project = projects[0]
-
-        println("[kfc] Project: ${project.name}")
         println("[kfc] Starting bridge on port $port ...")
-
-        val bridge = KfcBridge(engCtx, project, port)
+        val bridge = KfcBridge(kfcCtx, port)
         bridge.start()
 
         println("[kfc] Ready at http://localhost:$port")
-        println("[kfc] Press Ctrl+C to stop.")
+        println("[kfc] Waiting for load_apk ...")
 
         try {
             Thread.currentThread().join()
