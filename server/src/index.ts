@@ -160,6 +160,19 @@ Glob: * matches any chars, ? matches one char.`,
     text(await jeb("/api/bytecode/search", { pattern, limit: limit?.toString() ?? "" })),
 );
 
+// ---- Rename tools ----
+
+server.tool(
+  "rename",
+  "Rename a class, method, or field in JEB's analysis. The new name will be reflected in subsequent decompilation output. Provide the original Dalvik signature and the desired new name.",
+  {
+    sig: z.string().describe("Dalvik signature of the item to rename, e.g. Lcom/example/a; or Lcom/example/a;->b(I)V or Lcom/example/a;->c:I"),
+    new_name: z.string().describe("New name (simple name only, e.g. 'MainActivity', 'decryptData', 'mCounter')"),
+  },
+  async ({ sig, new_name }) =>
+    text(await jeb("/api/rename", { sig, new_name })),
+);
+
 // -------------------------------------------------------------------
 
 async function main() {

@@ -36,6 +36,9 @@ class KfcBridge(
         server.createContext("/api/method/cfg") { handle(it) { CodeHandler.methodCfg(ctx, it.queryParams) } }
         server.createContext("/api/bytecode/search") { handle(it) { BytecodeSearchHandler.search(ctx, it.queryParams) } }
 
+        // Rename
+        server.createContext("/api/rename") { handle(it) { RenameHandler.rename(ctx, it.queryParams) } }
+
         // Health
         server.createContext("/api/health") { handle(it) { """{"status":"ok"}""" } }
 

@@ -2,74 +2,32 @@
 
 > IDA → JEB → KFC
 
-AI-powered reverse engineering assistant. Bridges JEB's analysis engine to AI via MCP, letting AI navigate decompiled code, query cross-references, inspect class hierarchies, and more — just like a human analyst would in JEB.
-
-## Architecture
+Bridge JEB's static analysis to AI via MCP.
 
 ```
-AI (Cursor/Claude Code) ←stdio→ MCP Server (TS/Bun) ←HTTP→ JEB Headless + KFC Extension (Kotlin)
+AI (Cursor / Claude Code) ←stdio→ MCP Server (Bun) ←HTTP→ JEB Headless + KFC Extension (Kotlin)
 ```
-
-- **extension/** — Kotlin JEB script that starts an HTTP server inside JEB headless, exposing analysis capabilities
-- **server/** — TypeScript MCP server (runs on Bun) that translates AI tool calls into HTTP requests to the extension
-
-## Prerequisites
-
-- JEB Pro with headless support
-- JDK 17+
-- [Bun](https://bun.sh)
 
 ## Setup
 
-### 1. Build the extension
-
-Set your JEB installation path in `gradle.properties`:
-
-```properties
-jebHome=/Applications/JEB Pro
-```
-
-Then build:
+1. Set `jebHome` in `gradle.properties`, then build and deploy:
 
 ```bash
 ./gradlew build
-```
-
-This produces `extension/build/libs/kfc-0.1.0.jar`.
-
-### 2. Install MCP server dependencies
-
-```bash
+cp extension/build/libs/kfc-0.1.0.jar /path/to/jeb/coreplugins/
+cp kfc.py /path/to/jeb/coreplugins/
 cd server && bun install
 ```
 
-### 3. Deploy to JEB
-
-Copy the built JAR and launcher script to JEB's `coreplugins/` directory:
+2. Add a shell alias:
 
 ```bash
-cp extension/build/libs/kfc-0.1.0.jar /path/to/jeb/coreplugins/
-cp kfc.py /path/to/jeb/coreplugins/
+kfc() { /path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kfc.py -- "$(realpath "$1")"; }
 ```
 
-### 4. Start JEB with KFC
+3. Configure MCP in your AI client:
 
-```bash
-/path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kfc.py -- /path/to/target.apk
-```
-
-You should see:
-
-```
-[kfc] Project: target
-[kfc] Starting bridge on port 8199 ...
-[kfc] Ready at http://localhost:8199
-```
-
-### 5. Configure your AI client
-
-**Cursor** — add to `.cursor/mcp.json` (project-level) or Cursor Settings > MCP (global):
-
+**Cursor** — `.cursor/mcp.json`:
 ```json
 {
   "mcpServers": {
@@ -83,51 +41,31 @@ You should see:
 ```
 
 **Claude Code:**
-
 ```bash
 claude mcp add kfc -- bun /path/to/kfc/server/src/index.ts
 ```
 
-Or add the same JSON block to `~/.claude.json` for global access.
-
-## Shell Alias
-
-Add to your shell rc file (e.g. `~/.zshrc` or a sourced rc):
-
-```bash
-kfc() { /path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kfc.py -- "$(realpath "$1")"; }
-```
-
-Then simply:
+4. Start analyzing:
 
 ```bash
 kfc /path/to/target.apk
 ```
 
-## Available Tools
+## Tools
 
 | Tool | Description |
 |---|---|
-| `get_project_info` | Project overview: artifacts, DEX count, unit count |
-| `get_manifest` | Full AndroidManifest.xml content |
-| `get_permissions` | Extracted Android permissions |
+| `get_project_info` | Project overview |
+| `get_manifest` | AndroidManifest.xml |
+| `get_permissions` | Declared permissions |
 | `get_components` | Activities, services, receivers, providers |
-| `list_units` | All analysis units in the project |
-| `list_classes` | List/filter classes with pagination |
-| `decompile_class` | Decompile a class to Java source |
-| `decompile_method` | Decompile a specific method |
-| `get_class_hierarchy` | Superclass chain, interfaces, subclasses |
-| `get_xrefs` | Cross-references for methods, fields, or classes |
-| `search_strings` | Regex search on string constants with xref info |
-| `search_bytecode` | Glob search across all Dalvik bytecode instructions |
-| `get_method_cfg` | Control flow: instructions, opcodes, offsets |
-
-## Custom Port
-
-```bash
-# JEB side
-java -Dkfc.port=9000 -jar jeb.jar -c --srv2 --script=kfc.py -- app.apk
-
-# MCP server side
-KFC_API_HOST=http://localhost:9000 bun server/src/index.ts
-```
+| `list_units` | All analysis units |
+| `list_classes` | List/filter classes |
+| `decompile_class` | Decompile class to Java |
+| `decompile_method` | Decompile method to Java |
+| `get_class_hierarchy` | Superclasses, interfaces, subclasses |
+| `get_xrefs` | Cross-references |
+| `search_strings` | Regex search on string constants |
+| `search_bytecode` | Glob search on Dalvik bytecode |
+| `get_method_cfg` | Method instructions and control flow |
+| `rename` | Rename a class, method, or field |
