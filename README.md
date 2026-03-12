@@ -67,6 +67,6 @@ kfc
 | `get_class_hierarchy` | Superclasses, interfaces, subclasses |
 | `get_xrefs` | Cross-references |
 | `search_strings` | Regex search on string constants |
-| `search_bytecode` | Glob search on Dalvik bytecode |
+| `search_bytecode` | Regex search on Dalvik bytecode (FQN types) |
 | `get_method_cfg` | Method instructions and control flow |
 | `rename` | Rename a class, method, or field |

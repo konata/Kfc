@@ -9,7 +9,12 @@ object BytecodeSearchHandler {
         val pattern = params["pattern"] ?: return """{"error":"Missing 'pattern' parameter"}"""
         val limit = params["limit"]?.toIntOrNull() ?: 100
 
-        val regex = globToRegex(pattern)
+        val regex = try {
+            Regex(pattern, RegexOption.IGNORE_CASE)
+        } catch (e: Exception) {
+            return """{"error":"Invalid regex pattern: ${e.message}"}"""
+        }
+
         val results = mutableListOf<JsonObject>()
 
         for (dex in ctx.dexUnits) {
@@ -46,21 +51,5 @@ object BytecodeSearchHandler {
             put("limit", limit)
             putJsonArray("matches") { results.forEach { add(it) } }
         }.toString()
-    }
-
-    private fun globToRegex(glob: String): Regex {
-        val sb = StringBuilder()
-        for (c in glob) {
-            when (c) {
-                '*' -> sb.append(".*")
-                '?' -> sb.append(".")
-                '.', '(', ')', '[', ']', '{', '}', '\\', '^', '$', '|', '+' -> {
-                    sb.append('\\')
-                    sb.append(c)
-                }
-                else -> sb.append(c)
-            }
-        }
-        return Regex(sb.toString(), RegexOption.IGNORE_CASE)
     }
 }

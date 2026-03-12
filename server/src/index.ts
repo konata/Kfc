@@ -156,15 +156,18 @@ server.tool(
 
 server.tool(
   "search_bytecode",
-  `Search Dalvik bytecode across all methods using a glob pattern matched against formatted instructions.
+  `Search Dalvik bytecode across all methods using a regex pattern matched against formatted instructions.
+Type names use full Dalvik signatures (e.g., Landroid/content/Intent; not Intent).
+
 Examples:
-  "invoke*->getLaunchedFromPackage" — any invoke calling getLaunchedFromPackage
-  "const-string*encrypt*"          — const-string loading something with "encrypt"
-  "invoke*->Landroid/telephony*"   — any invoke into android.telephony package
-  "sget*->Landroid/os/Build;*"     — any static field read from android.os.Build
-Glob: * matches any chars, ? matches one char.`,
+  "invoke.*getLaunchedFromPackage" — any invoke calling getLaunchedFromPackage
+  "const-string.*encrypt"          — const-string loading something with "encrypt"
+  "invoke.*Landroid/telephony"     — any invoke into android.telephony package
+  "sget.*Landroid/os/Build;"       — any static field read from android.os.Build
+  "check-cast.*L.*Intent;"         — check-cast to any Intent type
+  "check-cast.*Landroid/content/Intent;" — check-cast to android.content.Intent`,
   {
-    pattern: z.string().describe("Glob pattern to match against formatted Dalvik instructions"),
+    pattern: z.string().describe("Regex pattern to match against formatted Dalvik instructions (case-insensitive)"),
     limit: z.number().optional().describe("Max results (default 100)"),
   },
   async ({ pattern, limit }) =>
