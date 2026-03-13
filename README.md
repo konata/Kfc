@@ -1,6 +1,13 @@
 # KFC
 
-> IDA → JEB → KFC
+```javascript
+const caesar = function* (s) {
+  while (true) (yield s, (s = String.fromCharCode(...[...s].map((c) => c.charCodeAt() + 1))))
+}
+
+;; [...caesar('IDA').take(3)].join(' ~> ')
+// ▶  IDA ~> JEB ~> KFC
+```
 
 Bridge JEB's static analysis to AI via MCP.
 
@@ -28,6 +35,7 @@ kfc() { /path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kf
 3. Configure MCP in your AI client:
 
 **Cursor** — `.cursor/mcp.json`:
+
 ```json
 {
   "mcpServers": {
@@ -41,6 +49,7 @@ kfc() { /path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kf
 ```
 
 **Claude Code:**
+
 ```bash
 claude mcp add kfc -- bun /path/to/kfc/server/src/index.ts
 ```
@@ -53,21 +62,21 @@ kfc
 
 ## Tools
 
-| Tool | Description |
-|---|---|
-| `load_apk` | Load or switch APK/DEX for analysis |
-| `get_project_info` | Project overview and current target |
-| `get_manifest` | AndroidManifest.xml |
-| `get_permissions` | Declared permissions |
-| `get_components` | Activities, services, receivers, providers |
-| `list_units` | All analysis units |
-| `list_classes` | List/filter classes |
-| `decompile_class` | Decompile class to Java |
-| `decompile_method` | Decompile method to Java |
-| `get_class_hierarchy` | Superclasses, interfaces, subclasses |
-| `get_overrides` | Method overrides (children/parents) |
-| `get_xrefs` | Cross-references |
-| `search_strings` | Regex search on string constants |
-| `search_bytecode` | Regex search on Dalvik bytecode (FQN types) |
-| `get_method_cfg` | Method instructions and control flow |
-| `rename` | Rename a class, method, or field |
+| Tool                  | Description                                 |
+| --------------------- | ------------------------------------------- |
+| `load_apk`            | Load or switch APK/DEX for analysis         |
+| `get_project_info`    | Project overview and current target         |
+| `get_manifest`        | AndroidManifest.xml                         |
+| `get_permissions`     | Declared permissions                        |
+| `get_components`      | Activities, services, receivers, providers  |
+| `list_units`          | All analysis units                          |
+| `list_classes`        | List/filter classes                         |
+| `decompile_class`     | Decompile class to Java                     |
+| `decompile_method`    | Decompile method to Java                    |
+| `get_class_hierarchy` | Superclasses, interfaces, subclasses        |
+| `get_overrides`       | Method overrides (children/parents)         |
+| `get_xrefs`           | Cross-references                            |
+| `search_strings`      | Regex search on string constants            |
+| `search_bytecode`     | Regex search on Dalvik bytecode (FQN types) |
+| `get_method_cfg`      | Method instructions and control flow        |
+| `rename`              | Rename a class, method, or field            |
