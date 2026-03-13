@@ -188,7 +188,7 @@ object CodeHandler {
             val method = dex.getMethod(sig) ?: continue
             val address = method.getSignature(false)
 
-            val actionCtx = ActionContext(Actions.QUERY_OVERRIDES, address)
+            val actionCtx = ActionContext(dex, Actions.QUERY_OVERRIDES, method.itemId, address)
             val data = ActionOverridesData()
 
             if (!dex.prepareExecution(actionCtx, data)) {
