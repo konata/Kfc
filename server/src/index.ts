@@ -124,6 +124,15 @@ server.tool(
 );
 
 server.tool(
+  "get_overrides",
+  "Get method overrides: children (classes overriding this method) and parents (methods this one overrides). Uses JEB's native type hierarchy analysis.",
+  {
+    sig: z.string().describe("Full method signature, e.g. Lcom/example/Base;->doAction(Ljava/lang/String;)V"),
+  },
+  async ({ sig }) => text(await jeb("/api/overrides", { sig })),
+);
+
+server.tool(
   "get_xrefs",
   "Get cross-references for a method, field, or class. Shows which methods reference the target.",
   {

@@ -27,6 +27,7 @@ class KfcBridge(
         server.createContext("/api/decompile/class") { handle(it) { CodeHandler.decompileClass(ctx, it.queryParams) } }
         server.createContext("/api/decompile/method") { handle(it) { CodeHandler.decompileMethod(ctx, it.queryParams) } }
         server.createContext("/api/hierarchy") { handle(it) { CodeHandler.classHierarchy(ctx, it.queryParams) } }
+        server.createContext("/api/overrides") { handle(it) { CodeHandler.getOverrides(ctx, it.queryParams) } }
         server.createContext("/api/xrefs") { handle(it) { XrefHandler.getXrefs(ctx, it.queryParams) } }
         server.createContext("/api/strings") { handle(it) { SearchHandler.searchStrings(ctx, it.queryParams) } }
         server.createContext("/api/method/cfg") { handle(it) { CodeHandler.methodCfg(ctx, it.queryParams) } }

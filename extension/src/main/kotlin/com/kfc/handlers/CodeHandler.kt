@@ -1,6 +1,9 @@
 package com.kfc.handlers
 
 import com.kfc.KfcContext
+import com.pnfsoftware.jeb.core.actions.ActionContext
+import com.pnfsoftware.jeb.core.actions.ActionOverridesData
+import com.pnfsoftware.jeb.core.actions.Actions
 import com.pnfsoftware.jeb.core.units.code.android.IDexUnit
 import com.pnfsoftware.jeb.core.units.code.android.dex.IDexClass
 import com.pnfsoftware.jeb.core.units.code.android.dex.IDexMethod
@@ -172,6 +175,36 @@ object CodeHandler {
                         })
                     }
                 }
+            }.toString()
+        }
+
+        return """{"error":"Method not found: $sig"}"""
+    }
+
+    fun getOverrides(ctx: KfcContext, params: Map<String, String>): String {
+        val sig = params["sig"] ?: return """{"error":"Missing 'sig' parameter"}"""
+
+        for (dex in ctx.dexUnits) {
+            val method = dex.getMethod(sig) ?: continue
+            val address = method.getSignature(false)
+
+            val actionCtx = ActionContext(Actions.QUERY_OVERRIDES, address)
+            val data = ActionOverridesData()
+
+            if (!dex.prepareExecution(actionCtx, data)) {
+                return """{"error":"QUERY_OVERRIDES not supported or failed for $sig"}"""
+            }
+            dex.executeAction(actionCtx, data)
+
+            val children = data.children?.map { it.getSignature(false) } ?: emptyList()
+            val parents = data.parents?.map { it.getSignature(false) } ?: emptyList()
+
+            return buildJsonObject {
+                put("method_signature", sig)
+                putJsonArray("children") { children.forEach { add(it) } }
+                putJsonArray("parents") { parents.forEach { add(it) } }
+                put("children_count", children.size)
+                put("parents_count", parents.size)
             }.toString()
         }
 
