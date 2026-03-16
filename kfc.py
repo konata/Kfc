@@ -1,34 +1,30 @@
 import os
 
-from com.pnfsoftware.jeb.client.api import IScript, IClientContext
+from com.pnfsoftware.jeb.client.api import IScript
 from java.io import File
-from java.net import URL, URLClassLoader
+from java.net import URLClassLoader
 
 
 class kfc(IScript):
+    entry = "kfc.mcp.Extension"
+
     def run(self, ctx):
-        eng = ctx.getEnginesContext()
-        if eng is None:
+        jar = self.find_jar()
+        if ctx.getEnginesContext() is None:
             print("[kfc] ERROR: No engines context")
             return
-
-        jar_path = self._find_jar()
-        if jar_path is None:
+        if jar is None:
             print("[kfc] ERROR: Cannot find kfc jar")
             return
 
-        url = File(jar_path).toURI().toURL()
-        loader = URLClassLoader([url], ctx.getClass().getClassLoader())
-        ext_class = loader.loadClass("com.kfc.KfcExtension")
-        ext = ext_class.getDeclaredConstructor().newInstance()
-        ext.run(ctx)
+        loader = URLClassLoader([File(jar).toURI().toURL()], ctx.getClass().getClassLoader())
+        loader.loadClass(self.entry).getDeclaredConstructor().newInstance().run(ctx)
 
-    def _find_jar(self):
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        for f in os.listdir(script_dir):
-            if f.startswith("kfc-") and f.endswith(".jar"):
-                return os.path.join(script_dir, f)
-        build_jar = os.path.join(script_dir, "extension", "build", "libs", "kfc-0.1.0.jar")
-        if os.path.isfile(build_jar):
-            return build_jar
-        return None
+    def find_jar(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        for name in os.listdir(here):
+            if name.startswith("kfc-") and name.endswith(".jar"):
+                return os.path.join(here, name)
+
+        jar = os.path.join(here, "extension", "build", "libs", "kfc-0.1.0.jar")
+        return jar if os.path.isfile(jar) else None
