@@ -82,6 +82,14 @@ tool(
 );
 
 tool(
+  "get_class_methods",
+  "Get the queried class plus each superclass in order, with only the methods declared on each class and basic override metadata.",
+  { cls: z.string().describe("Dalvik class signature") },
+  "/api/class/methods",
+  ({ cls }) => ({ cls }),
+);
+
+tool(
   "get_overrides",
   "Get method overrides: children (classes overriding this method) and parents (methods this one overrides). Uses JEB's native type hierarchy analysis.",
   {

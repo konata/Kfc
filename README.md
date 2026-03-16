@@ -81,6 +81,7 @@ kfc
 | `decompile_class`     | Decompile class to Java                     |
 | `decompile_method`    | Decompile method to Java                    |
 | `get_class_hierarchy` | Superclasses, interfaces, subclasses        |
+| `get_class_methods`   | Declared methods for class + superclass chain |
 | `get_overrides`       | Method overrides (children/parents)         |
 | `get_xrefs`           | Cross-references                            |
 | `search_strings`      | Regex search on string constants            |

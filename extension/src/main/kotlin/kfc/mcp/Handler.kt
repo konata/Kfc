@@ -7,12 +7,14 @@ import com.pnfsoftware.jeb.core.actions.Actions
 import com.pnfsoftware.jeb.core.input.FileInput
 import com.pnfsoftware.jeb.core.units.IUnit
 import com.pnfsoftware.jeb.core.units.IXmlUnit
+import com.pnfsoftware.jeb.core.units.code.ICodeItem
 import com.pnfsoftware.jeb.core.units.code.android.IApkUnit
 import com.pnfsoftware.jeb.core.units.code.android.IDexDecompilerUnit
 import com.pnfsoftware.jeb.core.units.code.android.IDexUnit
 import com.pnfsoftware.jeb.core.units.code.android.dex.DexPoolType
 import com.pnfsoftware.jeb.core.units.code.android.dex.IDexAddress
 import com.pnfsoftware.jeb.core.units.code.android.dex.IDexClass
+import com.pnfsoftware.jeb.core.units.code.android.dex.IDexMethod
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -170,6 +172,37 @@ sealed class Handler(val run: Ctx.(Map<String, String>) -> String) {
                     putJsonArray("superclass_chain") { chain.forEach { add(JsonPrimitive(it)) } }
                     putJsonArray("interfaces") { cls.allInterfaces(dex).forEach { add(JsonPrimitive(it)) } }
                     putJsonArray("subclasses") { subclasses.forEach { add(JsonPrimitive(it)) } }
+                }.toString()
+            }
+        } ?: err("Class not found: $signature")
+    })
+
+    data object ClassMethods : Handler(recover { queries ->
+        val signature = queries.required("cls")
+        dexes.firstNotNullOfOrNull { dex ->
+            dex.getClass(signature)?.let {
+                val chain = generateSequence(signature) { dex.getClass(it)?.sup }.toList()
+                val classesBySignature = chain.associateWith { sig -> dex.getClass(sig) }
+                buildJsonObject {
+                    put("query_class", signature)
+                    put("resolved", true)
+                    put("class_count", chain.size)
+                    putJsonArray("class_chain") {
+                        chain.forEachIndexed { index, classSignature ->
+                            val cls = classesBySignature[classSignature]
+                            add(buildJsonObject {
+                                put("class", classSignature)
+                                put("resolved", cls != null)
+                                put("super", cls?.sup ?: "")
+                                putJsonArray("interfaces") { cls?.ifs?.forEach { add(JsonPrimitive(it)) } }
+                                putJsonArray("methods") {
+                                    cls?.methods.orEmpty().forEach { method ->
+                                        add(describe(method, chain.drop(index + 1).mapNotNull(classesBySignature::get)))
+                                    }
+                                }
+                            })
+                        }
+                    }
                 }.toString()
             }
         } ?: err("Class not found: $signature")
@@ -352,3 +385,34 @@ fun referenceList(signature: String, kind: String, list: Collection<IDexAddress>
     putJsonArray("references_to") { list.orEmpty().take(limit).forEach { add(buildJsonObject { put("address", it.addr) }) } }
     put("reference_count", list?.size ?: 0)
 }.toString()
+
+fun describe(method: IDexMethod, ancestors: List<IDexClass>) = buildJsonObject {
+    val signature = method.getSignature(false)
+    val data = method.data
+    val flags = data?.accessFlags ?: method.genericFlags
+    put("signature", signature)
+    put("declared_in", method.classType.signature)
+    put("name", method.getName(false))
+    put("sub_signature", method.subSignature)
+    put("generic_flags", method.genericFlags)
+    put("access_flags", flags)
+    put("public", data?.isPublic ?: flags.hasFlag(ICodeItem.FLAG_PUBLIC))
+    put("protected", data?.isProtected ?: flags.hasFlag(ICodeItem.FLAG_PROTECTED))
+    put("private", data?.isPrivate ?: flags.hasFlag(ICodeItem.FLAG_PRIVATE))
+    put("static", data?.isStatic ?: flags.hasFlag(ICodeItem.FLAG_STATIC))
+    put("final", data?.isFinal ?: flags.hasFlag(ICodeItem.FLAG_FINAL))
+    put("abstract", data?.isAbstract ?: flags.hasFlag(ICodeItem.FLAG_ABSTRACT))
+    put("native", data?.isNative ?: flags.hasFlag(ICodeItem.FLAG_NATIVE))
+    put("synthetic", data?.isSynthetic ?: flags.hasFlag(ICodeItem.FLAG_SYNTHETIC))
+    put("constructor", data?.isConstructor ?: flags.hasFlag(ICodeItem.FLAG_CONSTRUCTOR))
+    put("has_code", data?.codeItem != null)
+    val overridden = ancestors.firstNotNullOfOrNull { ancestor ->
+        ancestor.methods.orEmpty().firstOrNull { it.subSignature == method.subSignature }?.getSignature(false)
+    }
+    if (overridden != null) put("overrides", overridden)
+}
+
+val IDexMethod.subSignature: String
+    get() = getSignature(false).substringAfter("->")
+
+fun Int.hasFlag(flag: Int) = this and flag != 0

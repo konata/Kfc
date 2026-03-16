@@ -57,6 +57,7 @@ object Kfc {
             route("/api/decompile/class", DecompileClass)
             route("/api/decompile/method", DecompileMethod)
             route("/api/hierarchy", Hierarchy)
+            route("/api/class/methods", ClassMethods)
             route("/api/overrides", Overrides)
             route("/api/xrefs", References)
             route("/api/strings", SearchStrings)
