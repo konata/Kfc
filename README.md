@@ -54,6 +54,13 @@ kfc() { /path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kf
 claude mcp add kfc -- bun /path/to/kfc/server/src/index.ts
 ```
 
+**Codex:**
+
+```bash
+codex mcp add kfc --env KFC_API_HOST=http://localhost:9527 -- bun /path/to/kfc/server/src/index.ts
+codex mcp list
+```
+
 4. Start the bridge, then let AI load the target:
 
 ```bash
