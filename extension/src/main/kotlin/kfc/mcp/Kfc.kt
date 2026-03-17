@@ -14,6 +14,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.net.InetSocketAddress
 import java.net.URLDecoder
+import kfc.mcp.Handler.*
 
 class Extension : IScript {
     override fun run(ctx: IClientContext) {
@@ -46,25 +47,25 @@ object Kfc {
         val ctx = Ctx(engine)
         return HttpServer.create(InetSocketAddress(port), 0).run {
             val route = route(ctx)
-            route("/api/load", Handler.Load)
+            route("/api/load", Load)
 
-            route("/api/meta/project", Handler.Project)
-            route("/api/meta/manifest", Handler.Manifest)
-            route("/api/meta/units", Handler.Units)
-            route("/api/meta/permissions", Handler.Permissions)
-            route("/api/meta/components", Handler.Components)
+            route("/api/meta/project", Project)
+            route("/api/meta/manifest", Manifest)
+            route("/api/meta/units", Units)
+            route("/api/meta/permissions", Permissions)
+            route("/api/meta/components", Components)
 
-            route("/api/classes", Handler.Classes)
-            route("/api/decompile/class", Handler.DecompileClass)
-            route("/api/decompile/method", Handler.DecompileMethod)
-            route("/api/hierarchy", Handler.Hierarchy)
-            route("/api/class/methods", Handler.ClassMethods)
-            route("/api/overrides", Handler.Overrides)
-            route("/api/xrefs", Handler.References)
-            route("/api/strings", Handler.SearchStrings)
-            route("/api/method/cfg", Handler.ControlFlow)
-            route("/api/bytecode/search", Handler.SearchBytecode)
-            route("/api/rename", Handler.Rename)
+            route("/api/classes", Classes)
+            route("/api/decompile/class", DecompileClass)
+            route("/api/decompile/method", DecompileMethod)
+            route("/api/hierarchy", Hierarchy)
+            route("/api/class/methods", ClassMethods)
+            route("/api/overrides", Overrides)
+            route("/api/xrefs", References)
+            route("/api/strings", SearchStrings)
+            route("/api/method/cfg", ControlFlow)
+            route("/api/bytecode/search", SearchBytecode)
+            route("/api/rename", Rename)
 
             get("/api/health") { """{"status":"ok"}""" }
 
