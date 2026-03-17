@@ -290,12 +290,9 @@ sealed class Handler<In, Out>(
             }
         } ?: fail("Symbol not found: ${input.sig}")
 
-        @Serializable
-        data class In(val sig: String, val limit: Int = 100)
-        @Serializable
-        data class Ref(val address: String)
-        @Serializable
-        data class Out(val target: String, val type: String, @SerialName("references_to") val referencesTo: List<Ref>, @SerialName("reference_count") val referenceCount: Int)
+        @Serializable data class In(val sig: String, val limit: Int = 100)
+        @Serializable data class Ref(val address: String)
+        @Serializable data class Out(val target: String, val type: String, @SerialName("references_to") val referencesTo: List<Ref>, @SerialName("reference_count") val referenceCount: Int)
     }
 
     data object SearchStrings : Handler<SearchStrings.In, SearchStrings.Out>(
@@ -319,14 +316,10 @@ sealed class Handler<In, Out>(
             return Out(pattern = input.pattern, count = matches.size, limit = input.limit, matches = matches)
         }
 
-        @Serializable
-        data class In(val pattern: String, val limit: Int = 200)
-        @Serializable
-        data class Ref(val address: String)
-        @Serializable
-        data class Match(val value: String, val index: Int, @SerialName("referenced_by") val referencedBy: List<Ref>)
-        @Serializable
-        data class Out(val pattern: String, val count: Int, val limit: Int, val matches: List<Match>)
+        @Serializable data class In(val pattern: String, val limit: Int = 200)
+        @Serializable data class Ref(val address: String)
+        @Serializable data class Match(val value: String, val index: Int, @SerialName("referenced_by") val referencedBy: List<Ref>)
+        @Serializable data class Out(val pattern: String, val count: Int, val limit: Int, val matches: List<Match>)
     }
 
     data object ControlFlow : Handler<ControlFlow.In, ControlFlow.Out>(
@@ -353,12 +346,9 @@ sealed class Handler<In, Out>(
             }
         } ?: fail("Method not found: ${input.sig}")
 
-        @Serializable
-        data class In(val sig: String)
-        @Serializable
-        data class Item(val offset: Long, val opcode: String, val text: String)
-        @Serializable
-        data class Out(@SerialName("method_signature") val methodSignature: String, @SerialName("instruction_count") val instructionCount: Int, @SerialName("register_count") val registerCount: Int, val instructions: List<Item>)
+        @Serializable data class In(val sig: String)
+        @Serializable data class Item(val offset: Long, val opcode: String, val text: String)
+        @Serializable data class Out(@SerialName("method_signature") val methodSignature: String, @SerialName("instruction_count") val instructionCount: Int, @SerialName("register_count") val registerCount: Int, val instructions: List<Item>)
     }
 
     data object SearchBytecode : Handler<SearchBytecode.In, SearchBytecode.Out>(
@@ -385,12 +375,9 @@ sealed class Handler<In, Out>(
             return Out(pattern = input.pattern, count = matches.size, limit = input.limit, matches = matches)
         }
 
-        @Serializable
-        data class In(val pattern: String, val limit: Int = 100)
-        @Serializable
-        data class Match(val method: String, @SerialName("class") val classSignature: String, val offset: Long, val instruction: String)
-        @Serializable
-        data class Out(val pattern: String, val count: Int, val limit: Int, val matches: List<Match>)
+        @Serializable data class In(val pattern: String, val limit: Int = 100)
+        @Serializable data class Match(val method: String, @SerialName("class") val classSignature: String, val offset: Long, val instruction: String)
+        @Serializable data class Out(val pattern: String, val count: Int, val limit: Int, val matches: List<Match>)
     }
 
     data object Rename : Handler<Rename.In, Rename.Out>(
@@ -403,10 +390,8 @@ sealed class Handler<In, Out>(
                 ?: dex.getField(input.sig)?.let { Out("field", input.sig, input.newName, it.setName(input.newName)) }
         } ?: fail("Item not found: ${input.sig}")
 
-        @Serializable
-        data class In(val sig: String, val newName: String)
-        @Serializable
-        data class Out(val type: String, val signature: String, @SerialName("new_name") val newName: String, val success: Boolean)
+        @Serializable data class In(val sig: String, val newName: String)
+        @Serializable data class Out(val type: String, val signature: String, @SerialName("new_name") val newName: String, val success: Boolean)
     }
 }
 
