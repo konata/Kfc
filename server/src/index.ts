@@ -299,6 +299,16 @@ tool(
   { success: z.boolean(), path: z.string(), units: z.number(), dex_count: z.number(), previous: z.string().nullable() },
   "/api/load",
   ({ path }) => ({ path }),
+  (value) => {
+    const item = record(value);
+    return {
+      success: item.success ?? true,
+      path: item.path,
+      units: item.units,
+      dex_count: item.dex_count,
+      previous: item.previous ?? null,
+    };
+  },
 );
 
 tool(
