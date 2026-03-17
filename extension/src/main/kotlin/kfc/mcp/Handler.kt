@@ -15,11 +15,14 @@ import com.pnfsoftware.jeb.core.units.code.android.dex.DexPoolType
 import com.pnfsoftware.jeb.core.units.code.android.dex.IDexAddress
 import com.pnfsoftware.jeb.core.units.code.android.dex.IDexClass
 import com.pnfsoftware.jeb.core.units.code.android.dex.IDexMethod
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.StringWriter
 import javax.xml.transform.OutputKeys
@@ -27,326 +30,384 @@ import javax.xml.transform.TransformerFactory
 import javax.xml.transform.dom.DOMSource
 import javax.xml.transform.stream.StreamResult
 
-sealed class Handler(val run: Ctx.(Map<String, String>) -> String) {
-    companion object {
-        fun recover(block: Ctx.(Map<String, String>) -> String): Ctx.(Map<String, String>) -> String =
-            { queries -> runCatching { block(queries) }.getOrElse { err(it.message ?: "unknown") } }
+sealed class Handler<In, Out>(
+    private val read: (Map<String, String>) -> In,
+    private val write: (Out) -> String,
+) {
+    protected abstract fun Ctx.execute(input: In): Out
+
+    fun handle(ctx: Ctx, queries: Map<String, String>) =
+        runCatching { write(with(this@Handler) { ctx.execute(read(queries)) }) }
+            .getOrElse { err(it.message ?: "unknown") }
+
+    class Adhoc(
+        private val body: Ctx.(Map<String, String>) -> Map<String, JsonElement>,
+    ) : Handler<Map<String, String>, Map<String, JsonElement>>({ it }, ::render) {
+        override fun Ctx.execute(input: Map<String, String>) = body(input)
     }
 
-    data object Load : Handler(recover { queries ->
-        val path = queries["path"].orEmpty()
-        val file = File(path).takeIf { it.isFile } ?: fail("File not found: $path")
+    class Raw(
+        private val body: Ctx.(Map<String, String>) -> String,
+    ) : Handler<Map<String, String>, String>({ it }, { it }) {
+        override fun Ctx.execute(input: Map<String, String>) = body(input)
+    }
 
-        val previousPath = currentPath
-        currentPath = file.absolutePath
-        project = engine.loadProject("kfc-${file.nameWithoutExtension}")?.apply { processArtifact(Artifact(file.name, FileInput(file))) }
-        units = project?.liveArtifacts.orEmpty().flatMap { it.units.orEmpty() }.flatMap { it.all }
-        apk = units.filterIsInstance<IApkUnit>().firstOrNull()
-        dexes = units.filterIsInstance<IDexUnit>()
-        primaryDex = dexes.firstOrNull()
-        manifest = units.filterIsInstance<IXmlUnit>().firstOrNull { it.name.equals("AndroidManifest.xml", true) || it.name.equals("Manifest", true) }
+    companion object {
+        val json = Json { encodeDefaults = true }
 
-        println("[kfc] Loaded: ${file.absolutePath} (units=${units.size}, dex=${dexes.size})")
-        buildJsonObject {
-            put("success", true)
-            put("path", file.absolutePath)
-            put("units", units.size)
-            put("dex_count", dexes.size)
-            previousPath?.let { put("previous", it) }
-        }.toString()
-    })
+        fun adhoc(body: Ctx.(Map<String, String>) -> Map<String, JsonElement>) = Adhoc(body)
 
-    data object Project : Handler(recover { _ ->
-        project?.let { project ->
-            buildJsonObject {
-                put("loaded", true)
-                currentPath?.let { put("path", it) }
-                put("project_name", project.name)
-                put("apk_detected", apk != null)
-                put("dex_count", dexes.size)
-                put("total_units", units.size)
-                putJsonArray("artifacts") { project.liveArtifacts.orEmpty().forEach { add(buildJsonObject { put("name", it.artifact?.name ?: "unknown") }) } }
-            }.toString()
-        } ?: buildJsonObject {
-            put("loaded", false)
-            put("message", "No project loaded. Use load_apk first.")
-        }.toString()
-    })
+        fun raw(body: Ctx.(Map<String, String>) -> String) = Raw(body)
 
-    data object Manifest : Handler(recover { _ ->
-        manifest?.let { buildJsonObject { put("content", xmlText(it)) }.toString() } ?: err("AndroidManifest.xml not found")
-    })
+        fun <T> encode(serializer: KSerializer<T>) = { value: T -> json.encodeToString(serializer, value) }
+    }
 
-    data object Units : Handler(recover { _ ->
-        buildJsonArray {
-            units.forEach { unit ->
-                add(buildJsonObject {
-                    put("name", unit.name)
-                    put("type", unit.javaClass.simpleName)
-                    put("description", unit.description ?: "")
-                    put("status", unit.status ?: "")
-                })
+    data object Load : Handler<String, Load.Out>({ it.required("path") }, encode(Out.serializer())) {
+        override fun Ctx.execute(input: String): Out {
+            val file = File(input).takeIf { it.isFile } ?: fail("File not found: $input")
+            val previousPath = currentPath
+            val loadedProject = engine.loadProject("kfc-${file.nameWithoutExtension}").required("Failed to load project: ${file.absolutePath}")
+
+            loadedProject.processArtifact(Artifact(file.name, FileInput(file)))
+            project = loadedProject
+            currentPath = file.absolutePath
+            units = loadedProject.liveArtifacts.orEmpty().flatMap { it.units.orEmpty() }.flatMap { it.all }
+            apk = units.filterIsInstance<IApkUnit>().firstOrNull()
+            dexes = units.filterIsInstance<IDexUnit>()
+            primaryDex = dexes.firstOrNull()
+            manifest = units.filterIsInstance<IXmlUnit>().firstOrNull { it.name.equals("AndroidManifest.xml", true) || it.name.equals("Manifest", true) }
+
+            println("[kfc] Loaded: ${file.absolutePath} (units=${units.size}, dex=${dexes.size})")
+            return Out(path = file.absolutePath, units = units.size, dexCount = dexes.size, previous = previousPath)
+        }
+
+        @Serializable data class Out(val success: Boolean = true, val path: String, val units: Int, @SerialName("dex_count") val dexCount: Int, val previous: String? = null)
+    }
+
+    data object Project : Handler<Unit, Project.Out>({ Unit }, encode(Out.serializer())) {
+        override fun Ctx.execute(input: Unit) = project?.let { loadedProject ->
+            Out(
+                loaded = true,
+                path = currentPath,
+                projectName = loadedProject.name,
+                apkDetected = apk != null,
+                dexCount = dexes.size,
+                totalUnits = units.size,
+                artifacts = loadedProject.liveArtifacts.orEmpty().map { Artifact(it.artifact?.name ?: "unknown") },
+            )
+        } ?: Out(loaded = false, message = "No project loaded. Use load_apk first.")
+
+        @Serializable data class Artifact(val name: String)
+        @Serializable data class Out(val loaded: Boolean, val path: String? = null, @SerialName("project_name") val projectName: String? = null, @SerialName("apk_detected") val apkDetected: Boolean = false, @SerialName("dex_count") val dexCount: Int = 0, @SerialName("total_units") val totalUnits: Int = 0, val artifacts: List<Artifact> = emptyList(), val message: String? = null)
+    }
+
+    data object Manifest : Handler<Unit, Manifest.Out>({ Unit }, encode(Out.serializer())) {
+        override fun Ctx.execute(input: Unit) = Out(manifest.required("AndroidManifest.xml not found").let(::xmlText))
+        @Serializable data class Out(val content: String)
+    }
+
+    data object Units : Handler<Unit, List<Units.Item>>({ Unit }, encode(ListSerializer(Item.serializer()))) {
+        override fun Ctx.execute(input: Unit) = units.map { unit ->
+            Item(
+                name = unit.name,
+                type = unit.javaClass.simpleName,
+                description = unit.description ?: "",
+                status = unit.status ?: "",
+            )
+        }
+
+        @Serializable data class Item(val name: String, val type: String, val description: String, val status: String)
+    }
+
+    data object Permissions : Handler<Unit, Permissions.Out>({ Unit }, encode(Out.serializer())) {
+        override fun Ctx.execute(input: Unit): Out {
+            val text = manifest?.let(::xmlText).orEmpty()
+            val permissions = Regex("""android:name="(android\.permission\.[^"]+)"""").findAll(text).map { it.groupValues[1] }.toList()
+            return Out(permissions)
+        }
+
+        @Serializable data class Out(val permissions: List<String>)
+    }
+
+    data object Components : Handler<Unit, Components.Out>({ Unit }, encode(Out.serializer())) {
+        override fun Ctx.execute(input: Unit): Out {
+            val text = manifest?.let(::xmlText).orEmpty()
+            fun find(tag: String) = Regex("""<$tag[^>]*android:name="([^"]+)"""").findAll(text).map { it.groupValues[1] }.toList()
+            return Out(
+                activities = find("activity"),
+                services = find("service"),
+                receivers = find("receiver"),
+                providers = find("provider"),
+            )
+        }
+
+        @Serializable data class Out(val activities: List<String>, val services: List<String>, val receivers: List<String>, val providers: List<String>)
+    }
+
+    data object Classes : Handler<Classes.In, Classes.Out>(
+        { In(filter = it["filter"].orEmpty(), offset = it.int("offset", 0), limit = it.int("limit", 200)) },
+        encode(Out.serializer()),
+    ) {
+        override fun Ctx.execute(input: In): Out {
+            val classes = dexes.flatMap { it.classes.orEmpty() }
+            val matches = classes.filter { it.classType.signature.contains(input.filter, true) }
+            return Out(
+                total = matches.size,
+                offset = input.offset,
+                limit = input.limit,
+                classes = matches.drop(input.offset).take(input.limit).map { cls ->
+                    Item(
+                        signature = cls.classType.signature,
+                        flags = cls.genericFlags,
+                        supertype = cls.sup ?: "",
+                        interfaces = cls.ifs.orEmpty().toList(),
+                        methodCount = cls.methods?.size ?: 0,
+                        fieldCount = cls.fields?.size ?: 0,
+                    )
+                },
+            )
+        }
+
+        @Serializable data class In(val filter: String = "", val offset: Int = 0, val limit: Int = 200)
+        @Serializable data class Item(val signature: String, val flags: Int, val supertype: String, val interfaces: List<String>, @SerialName("method_count") val methodCount: Int, @SerialName("field_count") val fieldCount: Int)
+        @Serializable data class Out(val total: Int, val offset: Int, val limit: Int, val classes: List<Item>)
+    }
+
+    data object DecompileClass : Handler<String, DecompileClass.Out>({ it.required("cls") }, encode(Out.serializer())) {
+        override fun Ctx.execute(input: String) = dexes.firstNotNullOfOrNull { dex ->
+            dex.getClass(input)?.let {
+                val unit = decompiler(this, dex).required("Decompiler not available")
+                if (!unit.decompileClass(input)) fail("Decompilation failed for $input")
+                Out(input, unit.getDecompiledClassText(input).required("No decompiled text for $input"))
             }
-        }.toString()
-    })
+        } ?: fail("Class not found: $input")
 
-    data object Permissions : Handler(recover { _ ->
-        val text = manifest?.let(::xmlText) ?: """{"permissions":[]}"""
-        val list = Regex("""android:name="(android\.permission\.[^"]+)"""").findAll(text).map { it.groupValues[1] }.toList()
-        buildJsonObject { putJsonArray("permissions") { list.forEach { add(JsonPrimitive(it)) } } }.toString()
-    })
+        @Serializable data class Out(val signature: String, val source: String)
+    }
 
-    data object Components : Handler(recover { _ ->
-        val text = manifest?.let(::xmlText) ?: """{"activities":[],"services":[],"receivers":[],"providers":[]}"""
-        fun find(tag: String) = Regex("""<$tag[^>]*android:name="([^"]+)"""").findAll(text).map { it.groupValues[1] }.toList()
-        buildJsonObject {
-            putJsonArray("activities") { find("activity").forEach { add(JsonPrimitive(it)) } }
-            putJsonArray("services") { find("service").forEach { add(JsonPrimitive(it)) } }
-            putJsonArray("receivers") { find("receiver").forEach { add(JsonPrimitive(it)) } }
-            putJsonArray("providers") { find("provider").forEach { add(JsonPrimitive(it)) } }
-        }.toString()
-    })
-
-    data object Classes : Handler(recover { queries ->
-        val filter = queries["filter"] ?: ""
-        val offset = queries["offset"]?.toIntOrNull() ?: 0
-        val limit = queries["limit"]?.toIntOrNull() ?: 200
-        val classes = dexes.flatMap { it.classes.orEmpty() }
-        val list = classes.filter { it.classType.signature.contains(filter, true) }
-        buildJsonObject {
-            put("total", list.size)
-            put("offset", offset)
-            put("limit", limit)
-            putJsonArray("classes") {
-                list.drop(offset).take(limit).forEach { cls ->
-                    add(buildJsonObject {
-                        put("signature", cls.classType.signature)
-                        put("flags", cls.genericFlags)
-                        put("supertype", cls.sup ?: "")
-                        putJsonArray("interfaces") { cls.ifs?.forEach { add(JsonPrimitive(it)) } }
-                        put("method_count", cls.methods?.size ?: 0)
-                        put("field_count", cls.fields?.size ?: 0)
-                    })
-                }
-            }
-        }.toString()
-    })
-
-    data object DecompileClass : Handler(recover { queries ->
-        val signature = queries.required("cls")
-        dexes.firstNotNullOfOrNull { dex ->
-            dex.getClass(signature)?.let {
-                val decompiler = decompiler(this, dex).required("Decompiler not available")
-                if (!decompiler.decompileClass(signature)) fail("Decompilation failed for $signature")
-                buildJsonObject { put("signature", signature); put("source", decompiler.getDecompiledClassText(signature).required("No decompiled text for $signature")) }.toString()
-            }
-        } ?: err("Class not found: $signature")
-    })
-
-    data object DecompileMethod : Handler(recover { queries ->
-        val signature = queries.required("sig")
-        dexes.firstNotNullOfOrNull { dex ->
-            dex.getMethod(signature)?.let { method ->
+    data object DecompileMethod : Handler<String, DecompileMethod.Out>({ it.required("sig") }, encode(Out.serializer())) {
+        override fun Ctx.execute(input: String) = dexes.firstNotNullOfOrNull { dex ->
+            dex.getMethod(input)?.let { method ->
                 val classSignature = method.classType.signature
-                val decompiler = decompiler(this, dex).required("Decompiler not available")
-                if (!decompiler.decompileClass(classSignature)) fail("Failed to decompile enclosing class $classSignature")
-                val source = decompiler.getDecompiledMethodText(signature) ?: decompiler.getDecompiledClassText(classSignature) ?: "(decompilation produced no output)"
-                buildJsonObject {
-                    put("method_signature", signature)
-                    put("class_signature", classSignature)
-                    put("source", source)
-                    if (decompiler.getDecompiledMethodText(signature) == null) put("note", "Full class returned; method-level extraction not available")
-                }.toString()
-            }
-        } ?: err("Method not found: $signature")
-    })
+                val unit = decompiler(this, dex).required("Decompiler not available")
+                if (!unit.decompileClass(classSignature)) fail("Failed to decompile enclosing class $classSignature")
 
-    data object Hierarchy : Handler(recover { queries ->
-        val signature = queries.required("cls")
-        dexes.firstNotNullOfOrNull { dex ->
-            dex.getClass(signature)?.let { cls ->
-                val chain = generateSequence(signature) { dex.getClass(it)?.sup }.toList()
-                val subclasses = dex.classes.orEmpty().asSequence().filter { it.sup == signature }.map { it.classType.signature }.toList()
-                buildJsonObject {
-                    put("signature", signature)
-                    putJsonArray("superclass_chain") { chain.forEach { add(JsonPrimitive(it)) } }
-                    putJsonArray("interfaces") { cls.allInterfaces(dex).forEach { add(JsonPrimitive(it)) } }
-                    putJsonArray("subclasses") { subclasses.forEach { add(JsonPrimitive(it)) } }
-                }.toString()
+                val methodSource = unit.getDecompiledMethodText(input)
+                val source = methodSource ?: unit.getDecompiledClassText(classSignature) ?: "(decompilation produced no output)"
+                Out(
+                    methodSignature = input,
+                    classSignature = classSignature,
+                    source = source,
+                    note = if (methodSource == null) "Full class returned; method-level extraction not available" else null,
+                )
             }
-        } ?: err("Class not found: $signature")
-    })
+        } ?: fail("Method not found: $input")
 
-    data object ClassMethods : Handler(recover { queries ->
-        val signature = queries.required("cls")
-        dexes.firstNotNullOfOrNull { dex ->
-            dex.getClass(signature)?.let {
-                val chain = generateSequence(signature) { dex.getClass(it)?.sup }.toList()
-                val classesBySignature = chain.associateWith { sig -> dex.getClass(sig) }
-                buildJsonObject {
-                    put("query_class", signature)
-                    put("resolved", true)
-                    put("class_count", chain.size)
-                    putJsonArray("class_chain") {
-                        chain.forEachIndexed { index, classSignature ->
-                            val cls = classesBySignature[classSignature]
-                            add(buildJsonObject {
-                                put("class", classSignature)
-                                put("resolved", cls != null)
-                                put("super", cls?.sup ?: "")
-                                putJsonArray("interfaces") { cls?.ifs?.forEach { add(JsonPrimitive(it)) } }
-                                putJsonArray("methods") {
-                                    cls?.methods.orEmpty().forEach { method ->
-                                        add(describe(method, chain.drop(index + 1).mapNotNull(classesBySignature::get)))
-                                    }
-                                }
-                            })
-                        }
-                    }
-                }.toString()
+        @Serializable data class Out(@SerialName("method_signature") val methodSignature: String, @SerialName("class_signature") val classSignature: String, val source: String, val note: String? = null)
+    }
+
+    data object Hierarchy : Handler<String, Hierarchy.Out>({ it.required("cls") }, encode(Out.serializer())) {
+        override fun Ctx.execute(input: String) = dexes.firstNotNullOfOrNull { dex ->
+            dex.getClass(input)?.let { cls ->
+                Out(
+                    signature = input,
+                    superclassChain = generateSequence(input) { dex.getClass(it)?.sup }.toList(),
+                    interfaces = cls.allInterfaces(dex),
+                    subclasses = dex.classes.orEmpty().asSequence().filter { it.sup == input }.map { it.classType.signature }.toList(),
+                )
             }
-        } ?: err("Class not found: $signature")
-    })
+        } ?: fail("Class not found: $input")
 
-    data object Overrides : Handler(recover { queries ->
-        val signature = queries.required("sig")
-        dexes.firstNotNullOfOrNull { dex ->
-            dex.getMethod(signature)?.let { method ->
+        @Serializable data class Out(val signature: String, @SerialName("superclass_chain") val superclassChain: List<String>, val interfaces: List<String>, val subclasses: List<String>)
+    }
+
+    data object ClassMethods : Handler<String, ClassMethods.Out>({ it.required("cls") }, encode(Out.serializer())) {
+        override fun Ctx.execute(input: String) = dexes.firstNotNullOfOrNull { dex ->
+            dex.getClass(input)?.let {
+                val chain = generateSequence(input) { dex.getClass(it)?.sup }.toList()
+                val classesBySignature = chain.associateWith { signature -> dex.getClass(signature) }
+                Out(
+                    queryClass = input,
+                    resolved = true,
+                    classCount = chain.size,
+                    classChain = chain.mapIndexed { index, classSignature ->
+                        val cls = classesBySignature[classSignature]
+                        Chain(
+                            classSignature = classSignature,
+                            resolved = cls != null,
+                            superSignature = cls?.sup ?: "",
+                            interfaces = cls?.ifs.orEmpty().toList(),
+                            methods = cls?.methods.orEmpty().map { method ->
+                                describe(method, chain.drop(index + 1).mapNotNull(classesBySignature::get))
+                            },
+                        )
+                    },
+                )
+            }
+        } ?: fail("Class not found: $input")
+
+        @Serializable data class Method(val signature: String, @SerialName("declared_in") val declaredIn: String, val name: String, @SerialName("sub_signature") val subSignature: String, @SerialName("generic_flags") val genericFlags: Int, @SerialName("access_flags") val accessFlags: Int, val public: Boolean, val protected: Boolean, val private: Boolean, val static: Boolean, val final: Boolean, val abstract: Boolean, val native: Boolean, val synthetic: Boolean, val constructor: Boolean, @SerialName("has_code") val hasCode: Boolean, val overrides: String? = null)
+        @Serializable data class Chain(@SerialName("class") val classSignature: String, val resolved: Boolean, @SerialName("super") val superSignature: String, val interfaces: List<String>, val methods: List<Method>)
+        @Serializable data class Out(@SerialName("query_class") val queryClass: String, val resolved: Boolean, @SerialName("class_count") val classCount: Int, @SerialName("class_chain") val classChain: List<Chain>)
+    }
+
+    data object Overrides : Handler<String, Overrides.Out>({ it.required("sig") }, encode(Out.serializer())) {
+        override fun Ctx.execute(input: String) = dexes.firstNotNullOfOrNull { dex ->
+            dex.getMethod(input)?.let { method ->
                 val action = ActionContext(dex, Actions.QUERY_OVERRIDES, method.itemId, method.getSignature(false))
                 val data = ActionOverridesData()
-                if (!dex.prepareExecution(action, data)) fail("QUERY_OVERRIDES not supported or failed for $signature")
+                if (!dex.prepareExecution(action, data)) fail("QUERY_OVERRIDES not supported or failed for $input")
                 dex.executeAction(action, data)
+
                 val children = data.children?.map { it.getSignature(false) }.orEmpty()
                 val parents = data.parents?.map { it.getSignature(false) }.orEmpty()
-                buildJsonObject {
-                    put("method_signature", signature)
-                    putJsonArray("children") { children.forEach { add(JsonPrimitive(it)) } }
-                    putJsonArray("parents") { parents.forEach { add(JsonPrimitive(it)) } }
-                    put("children_count", children.size)
-                    put("parents_count", parents.size)
-                }.toString()
+                Out(
+                    methodSignature = input,
+                    children = children,
+                    parents = parents,
+                    childrenCount = children.size,
+                    parentsCount = parents.size,
+                )
             }
-        } ?: err("Method not found: $signature")
-    })
+        } ?: fail("Method not found: $input")
 
-    data object References : Handler(recover { queries ->
-        val signature = queries.required("sig")
-        val limit = queries["limit"]?.toIntOrNull() ?: 100
-        dexes.firstNotNullOfOrNull { dex ->
+        @Serializable data class Out(@SerialName("method_signature") val methodSignature: String, val children: List<String>, val parents: List<String>, @SerialName("children_count") val childrenCount: Int, @SerialName("parents_count") val parentsCount: Int)
+    }
+
+    data object References : Handler<References.In, References.Out>(
+        { In(sig = it.required("sig"), limit = it.int("limit", 100)) },
+        encode(Out.serializer()),
+    ) {
+        override fun Ctx.execute(input: In) = dexes.firstNotNullOfOrNull { dex ->
             dex.referenceManager?.let { referenceManager ->
-                dex.getMethod(signature)?.let { referenceList(signature, "method", referenceManager.getReferences(DexPoolType.METHOD, it.index), limit) }
-                    ?: dex.getField(signature)?.let { referenceList(signature, "field", referenceManager.getReferences(DexPoolType.FIELD, it.index), limit) }
-                    ?: dex.getClass(signature)?.let {
-                        dex.getType(signature)?.let { type ->
-                            referenceList(signature, "class", referenceManager.getReferences(DexPoolType.TYPE, type.index), limit)
+                dex.getMethod(input.sig)?.let { referenceList(input.sig, "method", referenceManager.getReferences(DexPoolType.METHOD, it.index), input.limit) }
+                    ?: dex.getField(input.sig)?.let { referenceList(input.sig, "field", referenceManager.getReferences(DexPoolType.FIELD, it.index), input.limit) }
+                    ?: dex.getClass(input.sig)?.let {
+                        dex.getType(input.sig)?.let { type ->
+                            referenceList(input.sig, "class", referenceManager.getReferences(DexPoolType.TYPE, type.index), input.limit)
                         }
                     }
             }
-        } ?: err("Symbol not found: $signature")
-    })
+        } ?: fail("Symbol not found: ${input.sig}")
 
-    data object SearchStrings : Handler(recover { queries ->
-        val pattern = queries.required("pattern")
-        val limit = queries["limit"]?.toIntOrNull() ?: 200
-        val regex = runCatching { Regex(pattern, RegexOption.IGNORE_CASE) }.getOrElse { fail("Invalid regex pattern: ${it.message}") }
-        val matches = dexes.asSequence().flatMap { dex ->
-            dex.strings.orEmpty().asSequence().mapNotNull { string ->
-                string.value?.takeIf { regex.containsMatchIn(it) }?.let { value ->
-                    buildJsonObject {
-                        put("value", value)
-                        put("index", string.index)
-                        putJsonArray("referenced_by") { dex.referenceManager?.getReferences(DexPoolType.STRING, string.index)?.forEach { add(buildJsonObject { put("address", it.addr) }) } }
+        @Serializable
+        data class In(val sig: String, val limit: Int = 100)
+        @Serializable
+        data class Ref(val address: String)
+        @Serializable
+        data class Out(val target: String, val type: String, @SerialName("references_to") val referencesTo: List<Ref>, @SerialName("reference_count") val referenceCount: Int)
+    }
+
+    data object SearchStrings : Handler<SearchStrings.In, SearchStrings.Out>(
+        { In(pattern = it.required("pattern"), limit = it.int("limit", 200)) },
+        encode(Out.serializer()),
+    ) {
+        override fun Ctx.execute(input: In): Out {
+            val regex = runCatching { Regex(input.pattern, RegexOption.IGNORE_CASE) }.getOrElse { fail("Invalid regex pattern: ${it.message}") }
+            val matches = dexes.asSequence().flatMap { dex ->
+                dex.strings.orEmpty().asSequence().mapNotNull { string ->
+                    string.value?.takeIf { regex.containsMatchIn(it) }?.let { value ->
+                        Match(
+                            value = value,
+                            index = string.index,
+                            referencedBy = dex.referenceManager?.getReferences(DexPoolType.STRING, string.index).orEmpty().map { Ref(it.addr) },
+                        )
                     }
                 }
-            }
-        }.take(limit).toList()
-        buildJsonObject {
-            put("pattern", pattern)
-            put("count", matches.size)
-            put("limit", limit)
-            putJsonArray("matches") { matches.forEach { add(it) } }
-        }.toString()
-    })
+            }.take(input.limit).toList()
 
-    data object ControlFlow : Handler(recover { queries ->
-        val signature = queries.required("sig")
-        dexes.firstNotNullOfOrNull { dex ->
-            dex.getMethod(signature)?.let { method ->
+            return Out(pattern = input.pattern, count = matches.size, limit = input.limit, matches = matches)
+        }
+
+        @Serializable
+        data class In(val pattern: String, val limit: Int = 200)
+        @Serializable
+        data class Ref(val address: String)
+        @Serializable
+        data class Match(val value: String, val index: Int, @SerialName("referenced_by") val referencedBy: List<Ref>)
+        @Serializable
+        data class Out(val pattern: String, val count: Int, val limit: Int, val matches: List<Match>)
+    }
+
+    data object ControlFlow : Handler<ControlFlow.In, ControlFlow.Out>(
+        { In(it.required("sig")) },
+        encode(Out.serializer()),
+    ) {
+        override fun Ctx.execute(input: In) = dexes.firstNotNullOfOrNull { dex ->
+            dex.getMethod(input.sig)?.let { method ->
                 val data = method.data.required("Method has no body (abstract/native?)")
                 val code = data.codeItem.required("No code item available")
                 val instructions = code.instructions.required("No instructions available")
-                buildJsonObject {
-                    put("method_signature", signature)
-                    put("instruction_count", instructions.size)
-                    put("register_count", code.registerCount)
-                    putJsonArray("instructions") {
-                        instructions.take(500).forEach { instruction ->
-                            add(buildJsonObject {
-                                put("offset", instruction.offset)
-                                put("opcode", instruction.mnemonic ?: "unknown")
-                                put("text", instruction.format(null) ?: "")
-                            })
-                        }
-                    }
-                }.toString()
+                Out(
+                    methodSignature = input.sig,
+                    instructionCount = instructions.size,
+                    registerCount = code.registerCount,
+                    instructions = instructions.take(500).map { instruction ->
+                        Item(
+                            offset = instruction.offset,
+                            opcode = instruction.mnemonic ?: "unknown",
+                            text = instruction.format(null) ?: "",
+                        )
+                    },
+                )
             }
-        } ?: err("Method not found: $signature")
-    })
+        } ?: fail("Method not found: ${input.sig}")
 
-    data object SearchBytecode : Handler(recover { queries ->
-        val pattern = queries.required("pattern")
-        val limit = queries["limit"]?.toIntOrNull() ?: 100
-        val regex = runCatching { Regex(pattern, RegexOption.IGNORE_CASE) }.getOrElse { fail("Invalid regex pattern: ${it.message}") }
-        val matches = dexes.asSequence().flatMap { dex ->
-            dex.methods.orEmpty().asSequence().flatMap { method ->
-                method.data?.codeItem?.instructions.orEmpty().asSequence().mapNotNull { instruction ->
-                    runCatching { instruction.format(dex) }.getOrNull()?.takeIf { regex.containsMatchIn(it) }?.let { text ->
-                        buildJsonObject {
-                            put("method", method.getSignature(false))
-                            put("class", method.classType.getSignature(false))
-                            put("offset", instruction.offset)
-                            put("instruction", text)
+        @Serializable
+        data class In(val sig: String)
+        @Serializable
+        data class Item(val offset: Long, val opcode: String, val text: String)
+        @Serializable
+        data class Out(@SerialName("method_signature") val methodSignature: String, @SerialName("instruction_count") val instructionCount: Int, @SerialName("register_count") val registerCount: Int, val instructions: List<Item>)
+    }
+
+    data object SearchBytecode : Handler<SearchBytecode.In, SearchBytecode.Out>(
+        { In(pattern = it.required("pattern"), limit = it.int("limit", 100)) },
+        encode(Out.serializer()),
+    ) {
+        override fun Ctx.execute(input: In): Out {
+            val regex = runCatching { Regex(input.pattern, RegexOption.IGNORE_CASE) }.getOrElse { fail("Invalid regex pattern: ${it.message}") }
+            val matches = dexes.asSequence().flatMap { dex ->
+                dex.methods.orEmpty().asSequence().flatMap { method ->
+                    method.data?.codeItem?.instructions.orEmpty().asSequence().mapNotNull { instruction ->
+                        runCatching { instruction.format(dex) }.getOrNull()?.takeIf { regex.containsMatchIn(it) }?.let { text ->
+                            Match(
+                                method = method.getSignature(false),
+                                classSignature = method.classType.getSignature(false),
+                                offset = instruction.offset,
+                                instruction = text,
+                            )
                         }
                     }
                 }
-            }
-        }.take(limit).toList()
-        buildJsonObject {
-            put("pattern", pattern)
-            put("count", matches.size)
-            put("limit", limit)
-            putJsonArray("matches") { matches.forEach { add(it) } }
-        }.toString()
-    })
+            }.take(input.limit).toList()
 
-    data object Rename : Handler(recover { queries ->
-        val signature = queries.required("sig")
-        val name = queries.required("new_name")
-        dexes.firstNotNullOfOrNull { dex ->
-            dex.getClass(signature)?.let {
-                buildJsonObject {
-                    put("type", "class")
-                    put("signature", signature)
-                    put("new_name", name)
-                    put("success", it.setName(name))
-                }.toString()
-            } ?: dex.getMethod(signature)?.let {
-                buildJsonObject {
-                    put("type", "method")
-                    put("signature", signature)
-                    put("new_name", name)
-                    put("success", it.setName(name))
-                }.toString()
-            } ?: dex.getField(signature)?.let {
-                buildJsonObject {
-                    put("type", "field")
-                    put("signature", signature)
-                    put("new_name", name)
-                    put("success", it.setName(name))
-                }.toString()
-            }
-        } ?: err("Item not found: $signature")
-    })
+            return Out(pattern = input.pattern, count = matches.size, limit = input.limit, matches = matches)
+        }
+
+        @Serializable
+        data class In(val pattern: String, val limit: Int = 100)
+        @Serializable
+        data class Match(val method: String, @SerialName("class") val classSignature: String, val offset: Long, val instruction: String)
+        @Serializable
+        data class Out(val pattern: String, val count: Int, val limit: Int, val matches: List<Match>)
+    }
+
+    data object Rename : Handler<Rename.In, Rename.Out>(
+        { In(sig = it.required("sig"), newName = it.required("new_name")) },
+        encode(Out.serializer()),
+    ) {
+        override fun Ctx.execute(input: In) = dexes.firstNotNullOfOrNull { dex ->
+            dex.getClass(input.sig)?.let { Out("class", input.sig, input.newName, it.setName(input.newName)) }
+                ?: dex.getMethod(input.sig)?.let { Out("method", input.sig, input.newName, it.setName(input.newName)) }
+                ?: dex.getField(input.sig)?.let { Out("field", input.sig, input.newName, it.setName(input.newName)) }
+        } ?: fail("Item not found: ${input.sig}")
+
+        @Serializable
+        data class In(val sig: String, val newName: String)
+        @Serializable
+        data class Out(val type: String, val signature: String, @SerialName("new_name") val newName: String, val success: Boolean)
+    }
 }
 
 val IUnit.all: List<IUnit>
@@ -367,50 +428,62 @@ fun fail(message: String): Nothing = throw HandlerError(message)
 
 fun Map<String, String>.required(key: String) = get(key) ?: fail("Missing '$key' parameter")
 
+fun Map<String, String>.int(key: String, default: Int) = get(key)?.toIntOrNull() ?: default
+
 fun <T> T?.required(message: String): T = this ?: fail(message)
 
 fun IDexClass.allInterfaces(dex: IDexUnit): List<String> =
     ifs.orEmpty().flatMap { listOf(it) + dex.getClass(it)?.allInterfaces(dex).orEmpty() }.distinct()
 
 fun xmlText(xml: IXmlUnit) = runCatching {
-    StringWriter().also { out -> TransformerFactory.newInstance().newTransformer().apply { setOutputProperty(OutputKeys.INDENT, "yes"); transform(DOMSource(xml.document), StreamResult(out)) } }.toString()
+    StringWriter().also { out ->
+        TransformerFactory.newInstance().newTransformer().apply {
+            setOutputProperty(OutputKeys.INDENT, "yes")
+            transform(DOMSource(xml.document), StreamResult(out))
+        }
+    }.toString()
 }.getOrElse { "(failed to serialize XML: ${it.message})" }
 
 fun decompiler(ctx: Ctx, dex: IDexUnit) =
     ctx.units.filterIsInstance<IDexDecompilerUnit>().firstOrNull() ?: dex.children.orEmpty().filterIsInstance<IDexDecompilerUnit>().firstOrNull()
 
-fun referenceList(signature: String, kind: String, list: Collection<IDexAddress>?, limit: Int) = buildJsonObject {
-    put("target", signature)
-    put("type", kind)
-    putJsonArray("references_to") { list.orEmpty().take(limit).forEach { add(buildJsonObject { put("address", it.addr) }) } }
-    put("reference_count", list?.size ?: 0)
-}.toString()
+fun referenceList(signature: String, kind: String, list: Collection<IDexAddress>?, limit: Int) = Handler.References.Out(
+    target = signature,
+    type = kind,
+    referencesTo = list.orEmpty().take(limit).map { Handler.References.Ref(it.addr) },
+    referenceCount = list?.size ?: 0,
+)
 
-fun describe(method: IDexMethod, ancestors: List<IDexClass>) = buildJsonObject {
+fun describe(method: IDexMethod, ancestors: List<IDexClass>): Handler.ClassMethods.Method {
     val signature = method.getSignature(false)
     val data = method.data
     val flags = data?.accessFlags ?: method.genericFlags
-    put("signature", signature)
-    put("declared_in", method.classType.signature)
-    put("name", method.getName(false))
-    put("sub_signature", method.subSignature)
-    put("generic_flags", method.genericFlags)
-    put("access_flags", flags)
-    put("public", data?.isPublic ?: flags.hasFlag(ICodeItem.FLAG_PUBLIC))
-    put("protected", data?.isProtected ?: flags.hasFlag(ICodeItem.FLAG_PROTECTED))
-    put("private", data?.isPrivate ?: flags.hasFlag(ICodeItem.FLAG_PRIVATE))
-    put("static", data?.isStatic ?: flags.hasFlag(ICodeItem.FLAG_STATIC))
-    put("final", data?.isFinal ?: flags.hasFlag(ICodeItem.FLAG_FINAL))
-    put("abstract", data?.isAbstract ?: flags.hasFlag(ICodeItem.FLAG_ABSTRACT))
-    put("native", data?.isNative ?: flags.hasFlag(ICodeItem.FLAG_NATIVE))
-    put("synthetic", data?.isSynthetic ?: flags.hasFlag(ICodeItem.FLAG_SYNTHETIC))
-    put("constructor", data?.isConstructor ?: flags.hasFlag(ICodeItem.FLAG_CONSTRUCTOR))
-    put("has_code", data?.codeItem != null)
     val overridden = ancestors.firstNotNullOfOrNull { ancestor ->
         ancestor.methods.orEmpty().firstOrNull { it.subSignature == method.subSignature }?.getSignature(false)
     }
-    if (overridden != null) put("overrides", overridden)
+
+    return Handler.ClassMethods.Method(
+        signature = signature,
+        declaredIn = method.classType.signature,
+        name = method.getName(false),
+        subSignature = method.subSignature,
+        genericFlags = method.genericFlags,
+        accessFlags = flags,
+        public = data?.isPublic ?: flags.hasFlag(ICodeItem.FLAG_PUBLIC),
+        protected = data?.isProtected ?: flags.hasFlag(ICodeItem.FLAG_PROTECTED),
+        private = data?.isPrivate ?: flags.hasFlag(ICodeItem.FLAG_PRIVATE),
+        static = data?.isStatic ?: flags.hasFlag(ICodeItem.FLAG_STATIC),
+        final = data?.isFinal ?: flags.hasFlag(ICodeItem.FLAG_FINAL),
+        abstract = data?.isAbstract ?: flags.hasFlag(ICodeItem.FLAG_ABSTRACT),
+        native = data?.isNative ?: flags.hasFlag(ICodeItem.FLAG_NATIVE),
+        synthetic = data?.isSynthetic ?: flags.hasFlag(ICodeItem.FLAG_SYNTHETIC),
+        constructor = data?.isConstructor ?: flags.hasFlag(ICodeItem.FLAG_CONSTRUCTOR),
+        hasCode = data?.codeItem != null,
+        overrides = overridden,
+    )
 }
+
+fun render(fields: Map<String, JsonElement>) = JsonObject(fields).toString()
 
 val IDexMethod.subSignature: String
     get() = getSignature(false).substringAfter("->")
