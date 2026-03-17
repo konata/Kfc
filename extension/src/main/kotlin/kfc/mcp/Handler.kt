@@ -29,6 +29,8 @@ import javax.xml.transform.OutputKeys
 import javax.xml.transform.TransformerFactory
 import javax.xml.transform.dom.DOMSource
 import javax.xml.transform.stream.StreamResult
+import org.w3c.dom.Element
+import org.w3c.dom.NodeList
 
 sealed class Handler<In, Out>(
     private val read: (Map<String, String>) -> In,
@@ -120,26 +122,18 @@ sealed class Handler<In, Out>(
     }
 
     data object Permissions : Handler<Unit, Permissions.Out>({ Unit }, encode(Out.serializer())) {
-        override fun Ctx.execute(input: Unit): Out {
-            val text = manifest?.let(::xmlText).orEmpty()
-            val permissions = Regex("""android:name="(android\.permission\.[^"]+)"""").findAll(text).map { it.groupValues[1] }.toList()
-            return Out(permissions)
-        }
+        override fun Ctx.execute(input: Unit) = Out(manifest?.permissions().orEmpty())
 
         @Serializable data class Out(val permissions: List<String>)
     }
 
     data object Components : Handler<Unit, Components.Out>({ Unit }, encode(Out.serializer())) {
-        override fun Ctx.execute(input: Unit): Out {
-            val text = manifest?.let(::xmlText).orEmpty()
-            fun find(tag: String) = Regex("""<$tag[^>]*android:name="([^"]+)"""").findAll(text).map { it.groupValues[1] }.toList()
-            return Out(
-                activities = find("activity"),
-                services = find("service"),
-                receivers = find("receiver"),
-                providers = find("provider"),
-            )
-        }
+        override fun Ctx.execute(input: Unit) = Out(
+            activities = manifest?.components("activity").orEmpty(),
+            services = manifest?.components("service").orEmpty(),
+            receivers = manifest?.components("receiver").orEmpty(),
+            providers = manifest?.components("provider").orEmpty(),
+        )
 
         @Serializable data class Out(val activities: List<String>, val services: List<String>, val receivers: List<String>, val providers: List<String>)
     }
@@ -428,6 +422,28 @@ fun xmlText(xml: IXmlUnit) = runCatching {
         }
     }.toString()
 }.getOrElse { "(failed to serialize XML: ${it.message})" }
+
+fun IXmlUnit.permissions() =
+    document.documentElement?.children.orEmpty()
+        .filter { it.tagName.startsWith("uses-permission") }
+        .mapNotNull { it.android("name") }
+        .distinct()
+
+fun IXmlUnit.components(tag: String) =
+    document.documentElement?.first("application")?.children.orEmpty()
+        .filter { it.tagName == tag }
+        .mapNotNull { it.android("name") }
+
+fun Element.android(name: String) =
+    getAttributeNS("http://schemas.android.com/apk/res/android", name).takeIf(String::isNotBlank)
+        ?: getAttribute("android:$name").takeIf(String::isNotBlank)
+
+val Element.children: List<Element>
+    get() = childNodes.elements()
+
+fun Element.first(tag: String) = children.firstOrNull { it.tagName == tag }
+
+fun NodeList.elements() = (0 until length).mapNotNull { item(it) as? Element }
 
 fun decompiler(ctx: Ctx, dex: IDexUnit) =
     ctx.units.filterIsInstance<IDexDecompilerUnit>().firstOrNull() ?: dex.children.orEmpty().filterIsInstance<IDexDecompilerUnit>().firstOrNull()
