@@ -302,6 +302,42 @@ function task<I extends Shape, O extends Shape>(
 }
 
 task(
+  "decompile_apk_method",
+  "Use this as the direct entry point when the user provides an Android APK/DEX path plus a Dalvik method signature or descriptor and asks to decompile, explain, or inspect what that method does. Handles prompts like '反编译这个 APK 里的方法', '看看这个方法在做什么', and descriptors such as Lp5/w;->m(Ljava/lang/String;)Ljava/lang/String;. Loads the APK, then decompiles the method with JEB in one call.",
+  {
+    path: z.string().describe("Absolute path to the APK or DEX file on the server machine"),
+    sig: z.string().describe("Full Dalvik method signature, e.g. Lp5/w;->m(Ljava/lang/String;)Ljava/lang/String;"),
+  },
+  {
+    loaded: z.boolean(),
+    path: z.string(),
+    previous: z.string().nullable(),
+    method_signature: z.string(),
+    class_signature: z.string(),
+    source: z.string(),
+    note: z.string().nullish(),
+  },
+  async ({ path, sig }) => {
+    const loaded = z.object({
+      success: z.boolean(),
+      path: z.string(),
+      previous: z.string().nullable().optional(),
+    }).parse(await bridge("/api/load", { path }));
+    const method = decompiledMethodOut.parse(await bridge("/api/decompile/method", { sig }));
+
+    return {
+      loaded: loaded.success,
+      path: loaded.path,
+      previous: loaded.previous ?? null,
+      method_signature: method.method_signature,
+      class_signature: method.class_signature,
+      source: method.source,
+      note: method.note,
+    };
+  },
+);
+
+task(
   "triage_apk",
   "Use this as the entry point when the user asks to reverse engineer, decompile, audit, triage, or inspect an Android APK with JEB. Loads the APK and returns the first-pass manifest attack surface, permissions, units, and recommended next KFC tools.",
   { path: z.string().describe("Absolute path to the APK file on the server machine") },
