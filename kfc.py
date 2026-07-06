@@ -26,5 +26,5 @@ class kfc(IScript):
             if name.startswith("kfc-") and name.endswith(".jar"):
                 return os.path.join(here, name)
 
-        jar = os.path.join(here, "extension", "build", "libs", "kfc-0.1.0.jar")
+        jar = os.path.join(here, "extension", "build", "libs", "kfc-0.1.1.jar")
         return jar if os.path.isfile(jar) else None

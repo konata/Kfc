@@ -4,7 +4,16 @@ import { XMLParser } from "fast-xml-parser";
 import { z } from "zod";
 
 const api = process.env.KFC_API_HOST ?? "http://localhost:9527";
-const server = new McpServer({ name: "kfc", version: "0.1.0" });
+const instructions = `
+KFC drives JEB for Android APK static analysis from AI agents. Use it when the user asks to inspect,
+triage, audit, reverse engineer, decompile, or trace an Android APK, DEX, manifest component,
+permission boundary, exported provider/service/receiver/activity, xref, bytecode pattern, or Java
+source recovered from an app. Start with triage_apk for a new APK. If a project is already loaded,
+use find_exported_components for the manifest attack surface, inspect_component for Android entry
+methods, search_bytecode/search_strings for sinks and constants, find_callers for xref callers, and
+decompile_method/decompile_class for final source-level evidence.
+`.trim();
+const server = new McpServer({ name: "kfc", version: "0.1.1" }, { instructions });
 const xml = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "", parseTagValue: false, trimValues: true });
 const componentKinds = ["activity", "service", "receiver", "provider"] as const;
 
@@ -292,9 +301,79 @@ function task<I extends Shape, O extends Shape>(
     respond(output, () => run(input.parse(raw)))) as any);
 }
 
+task(
+  "triage_apk",
+  "Use this as the entry point when the user asks to reverse engineer, decompile, audit, triage, or inspect an Android APK with JEB. Loads the APK and returns the first-pass manifest attack surface, permissions, units, and recommended next KFC tools.",
+  { path: z.string().describe("Absolute path to the APK file on the server machine") },
+  {
+    loaded: z.boolean(),
+    path: z.string(),
+    previous: z.string().nullable(),
+    package_name: z.string(),
+    dex_count: z.number(),
+    unit_count: z.number(),
+    native_libraries: z.array(z.string()),
+    permissions: z.array(z.string()),
+    component_counts: z.object({
+      activities: z.number(),
+      services: z.number(),
+      receivers: z.number(),
+      providers: z.number(),
+      exported: z.number(),
+    }),
+    exported_components: z.array(componentInfo),
+    units: z.array(unit),
+    next_steps: z.array(z.string()),
+  },
+  async ({ path }) => {
+    const loaded = z.object({
+      success: z.boolean(),
+      path: z.string(),
+      units: z.number(),
+      dex_count: z.number(),
+      previous: z.string().nullable().optional(),
+    }).parse(await bridge("/api/load", { path }));
+    const [manifest, permissions, units] = await Promise.all([
+      bridge("/api/meta/manifest").then((value) => z.object({ content: z.string() }).parse(value)),
+      bridge("/api/meta/permissions").then((value) => z.object({ permissions: z.array(z.string()) }).parse(value)),
+      bridge("/api/meta/units").then((value) => z.array(unit).parse(value)),
+    ]);
+    const parsed = parseManifest(manifest.content);
+    const components = parsed.components.map(describeComponent);
+    const exported = components.filter((component) => component.exported === true);
+    const nativeLibraries = units.map((item) => item.name).filter((name) => name.includes(".so"));
+
+    return {
+      loaded: loaded.success,
+      path: loaded.path,
+      previous: loaded.previous ?? null,
+      package_name: parsed.packageName,
+      dex_count: loaded.dex_count,
+      unit_count: loaded.units,
+      native_libraries: nativeLibraries,
+      permissions: permissions.permissions,
+      component_counts: {
+        activities: parsed.components.filter((component) => component.kind === "activity").length,
+        services: parsed.components.filter((component) => component.kind === "service").length,
+        receivers: parsed.components.filter((component) => component.kind === "receiver").length,
+        providers: parsed.components.filter((component) => component.kind === "provider").length,
+        exported: exported.length,
+      },
+      exported_components: exported,
+      units,
+      next_steps: [
+        "Call inspect_component on exported components with no permission, broad intent filters, provider authorities, or interesting processes.",
+        "For providers, inspect query/insert/update/delete/call/openFile/openAssetFile/openTypedAssetFile before deciding reachability.",
+        "Use search_bytecode for Android sinks such as startActivity, bindService, sendBroadcast, ContentResolver, Settings, Runtime.exec, DexClassLoader, loadLibrary, and openFile.",
+        "Use find_callers for grouped xref callers, then decompile_method or decompile_class for source-level evidence.",
+      ],
+    };
+  },
+);
+
 tool(
   "load_apk",
-  "Load an APK/DEX file into JEB for analysis. Can be called at any time to switch targets.",
+  "Load an APK/DEX file into JEB for analysis. Use this first when switching targets manually; prefer triage_apk for a new Android APK audit or reverse-engineering task.",
   { path: z.string().describe("Absolute path to the APK or DEX file on the server machine") },
   { success: z.boolean(), path: z.string(), units: z.number(), dex_count: z.number(), previous: z.string().nullable() },
   "/api/load",
@@ -342,11 +421,11 @@ tool(
   },
 );
 
-tool("get_manifest", "Get the full AndroidManifest.xml content of the loaded APK.", {}, { content: z.string() }, "/api/meta/manifest");
+tool("get_manifest", "Get the full AndroidManifest.xml content of the loaded APK. Use after load_apk/triage_apk when raw manifest evidence or exact attributes are needed.", {}, { content: z.string() }, "/api/meta/manifest");
 
 tool(
   "list_units",
-  "List all analysis units (DEX, resources, native libs, etc.) in the project.",
+  "List all JEB analysis units in the loaded project, including DEX, resources, manifest/XML units, and native libraries. Use when mapping what an APK contains before deeper reverse engineering.",
   {},
   { units: z.array(unit) },
   "/api/meta/units",
@@ -354,11 +433,11 @@ tool(
   (value) => ({ units: value }),
 );
 
-tool("get_permissions", "Extract all Android permissions declared in the manifest.", {}, { permissions: z.array(z.string()) }, "/api/meta/permissions");
+tool("get_permissions", "Extract Android permissions declared in the loaded APK manifest. Use for permission-boundary review and to compare declared privileges with exported components and sensitive code paths.", {}, { permissions: z.array(z.string()) }, "/api/meta/permissions");
 
 tool(
   "get_components",
-  "List Android components: activities, services, receivers, providers.",
+  "List raw Android manifest components: activities, services, receivers, and providers. Prefer find_exported_components when auditing exposed attack surface.",
   {},
   {
     activities: z.array(z.string()),
@@ -371,7 +450,7 @@ tool(
 
 tool(
   "list_classes",
-  "List classes in the DEX. Supports filtering by package/class name substring. Returns signature, supertype, interfaces, method/field counts. Use offset/limit for pagination.",
+  "List classes in the loaded DEX. Use after triage_apk/load_apk when you know a package, component, obfuscated prefix, or class-name substring and need Dalvik signatures for decompilation.",
   {
     filter: z.string().optional().describe("Substring to filter class signatures (e.g. 'com.example')"),
     offset: z.number().optional().describe("Pagination offset (default 0)"),
@@ -384,7 +463,7 @@ tool(
 
 tool(
   "decompile_class",
-  "Decompile a class to Java source code. Provide the full Dalvik signature.",
+  "Decompile a class to Java source with JEB. Use for Android component classes, Binder stubs, helpers, loaders, providers, or obfuscated classes when method-level context is insufficient.",
   { cls: z.string().describe("Dalvik class signature, e.g. Lcom/example/MainActivity;") },
   { signature: z.string(), source: z.string() },
   "/api/decompile/class",
@@ -393,7 +472,7 @@ tool(
 
 tool(
   "decompile_method",
-  "Decompile a specific method to Java source code.",
+  "Decompile a specific method to Java source with JEB. Use for lifecycle entries, provider methods, Binder handlers, permission checks, exploit sinks, or caller methods returned by find_callers.",
   { sig: z.string().describe("Full method signature, e.g. Lcom/example/Utils;->decrypt(Ljava/lang/String;)Ljava/lang/String;") },
   { method_signature: z.string(), class_signature: z.string(), source: z.string(), note: z.string().nullish() },
   "/api/decompile/method",
@@ -402,7 +481,7 @@ tool(
 
 tool(
   "get_class_hierarchy",
-  "Get the inheritance chain (superclasses), implemented interfaces, and direct subclasses of a class.",
+  "Get a class inheritance chain, implemented interfaces, and direct subclasses. Use to resolve Android lifecycle inheritance, Binder interfaces, abstract handlers, and framework callbacks before choosing methods to decompile.",
   { cls: z.string().describe("Dalvik class signature") },
   { signature: z.string(), superclass_chain: z.array(z.string()), interfaces: z.array(z.string()), subclasses: z.array(z.string()) },
   "/api/hierarchy",
@@ -411,7 +490,7 @@ tool(
 
 tool(
   "get_class_methods",
-  "Get the queried class plus each superclass in order, with only the methods declared on each class and basic override metadata.",
+  "Get declared methods for a class and each superclass, plus override metadata. Use to find lifecycle entries, provider overrides, Binder transaction handlers, and inherited methods before decompilation.",
   { cls: z.string().describe("Dalvik class signature") },
   { query_class: z.string(), resolved: z.boolean(), class_count: z.number(), class_chain: z.array(classChain) },
   "/api/class/methods",
@@ -420,7 +499,7 @@ tool(
 
 tool(
   "get_overrides",
-  "Get method overrides: children (classes overriding this method) and parents (methods this one overrides). Uses JEB's native type hierarchy analysis.",
+  "Get method overrides: children overriding the target and parents this method overrides. Use for callback/interface dispatch, Android framework overrides, Binder-style handlers, and obfuscated subclass tracing.",
   { sig: z.string().describe("Full method signature, e.g. Lcom/example/Base;->doAction(Ljava/lang/String;)V") },
   { method_signature: z.string(), children: z.array(z.string()), parents: z.array(z.string()), children_count: z.number(), parents_count: z.number() },
   "/api/overrides",
@@ -429,7 +508,7 @@ tool(
 
 tool(
   "get_xrefs",
-  "Get cross-references for a method, field, or class. Shows which methods reference the target.",
+  "Get raw cross-references for a method, field, or class. Use for precise address-level references; prefer find_callers when you want grouped caller methods to inspect.",
   {
     sig: z.string().describe("Signature of method, field, or class to look up xrefs for"),
     limit: z.number().optional().describe("Max references to return (default 100)"),
@@ -441,7 +520,7 @@ tool(
 
 tool(
   "search_strings",
-  "Search for string constants in DEX matching a regex pattern. Also returns which methods reference each matched string.",
+  "Search DEX string constants with a regex and return referencing methods. Use for Android action strings, authorities, permissions, settings keys, file paths, URLs, commands, class names, and feature flags.",
   {
     pattern: z.string().describe("Regex pattern to match against string constants"),
     limit: z.number().optional().describe("Max results (default 200)"),
@@ -462,7 +541,7 @@ tool(
 
 tool(
   "search_bytecode",
-  `Search Dalvik bytecode across all methods using a regex pattern matched against formatted instructions.
+  `Search Dalvik bytecode across all methods using a regex pattern matched against formatted instructions. Use this for Android APK auditing when you need to find API calls, sinks, casts, field reads/writes, dynamic loading, IPC, settings writes, file access, or suspicious framework/OEM calls across the loaded DEX.
 Type names use full Dalvik signatures (e.g., Landroid/content/Intent; not Intent).
 
 Examples:
@@ -495,7 +574,7 @@ tool(
 
 task(
   "find_exported_components",
-  "Find exported Android components and surface their declared permissions, authorities, and intent filters. Prefer this over raw manifest parsing when you want the app's exposed entry points.",
+  "Find exported Android manifest components and surface declared permissions, provider authorities, processes, and intent filters. Use after triage_apk/load_apk as the default entry point for APK attack-surface review.",
   { kind: componentKind.optional().describe("Optional component type filter: activity, service, receiver, or provider") },
   { package_name: z.string(), count: z.number(), components: z.array(componentInfo) },
   async ({ kind }) => {
@@ -510,7 +589,7 @@ task(
 
 task(
   "inspect_component",
-  "Inspect a manifest component and summarize the metadata and likely entry methods the AI should read first.",
+  "Inspect an Android manifest component and return metadata, class hierarchy, likely lifecycle/provider entry methods, and optional decompiled snippets. Use after triage_apk or find_exported_components to begin source-level reachability review.",
   {
     component: z.string().describe("Component name, manifest name, or Dalvik class signature"),
     include_source: z.boolean().optional().describe("Include decompiled source for likely entry methods (default true)"),
@@ -585,7 +664,7 @@ task(
 
 task(
   "find_callers",
-  "Resolve a method, field, or class xref result into caller methods that are easier for the AI to inspect than raw addresses.",
+  "Resolve xrefs for a method, field, or class into grouped caller methods that are easier to inspect than raw addresses. Use for tracing sensitive Android APIs, app helpers, permission checks, settings writes, loaders, IPC methods, and exported-component sinks.",
   {
     sig: z.string().describe("Target method, field, or class signature"),
     limit: z.number().optional().describe("Max xref addresses to inspect (default 100)"),

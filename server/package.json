@@ -1,6 +1,6 @@
 {
   "name": "@beriru/kfc",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI and MCP bridge for using JEB static analysis from AI agents",
   "type": "module",
   "main": "src/index.ts",

@@ -100,6 +100,7 @@ This split is intentional. In practice, AI clients often miss raw primitives lik
 
 | Tool                       | Description                                                       |
 | -------------------------- | ----------------------------------------------------------------- |
+| `triage_apk`               | Load an APK and return first-pass manifest, permission, component, unit, and next-step triage |
 | `find_exported_components` | Find exported manifest components with permissions and intent filters |
 | `inspect_component`        | Resolve a component to its class, hierarchy, and likely entry methods |
 | `find_callers`             | Turn raw xrefs into caller methods that are easier for AI to inspect |
