@@ -1,11 +1,24 @@
 {
-  "name": "kfc-server",
+  "name": "@beriru/kfc",
   "version": "0.1.0",
-  "description": "MCP server that bridges AI to JEB decompiler analysis",
+  "description": "CLI and MCP bridge for using JEB static analysis from AI agents",
   "type": "module",
   "main": "src/index.ts",
+  "bin": {
+    "kfc": "src/cli.ts"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "jeb"
+  ],
   "scripts": {
+    "kfc": "bun src/cli.ts",
     "start": "bun src/index.ts",
+    "mcp": "bun src/cli.ts mcp",
+    "build:jeb": "cd .. && ./gradlew :extension:shadowJar",
+    "stage:jeb": "bun scripts/stage-jeb.ts",
+    "prepack": "bun run build:jeb && bun run stage:jeb",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

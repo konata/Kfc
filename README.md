@@ -9,62 +9,82 @@ const caesar = function* (s) {
 // ▶  IDA ~> JEB ~> KFC
 ```
 
-Bridge JEB's static analysis to AI via MCP.
-
-```
-AI (Cursor / Claude Code) ←stdio→ MCP Server (Bun) ←HTTP→ JEB Headless + KFC Extension (Kotlin)
-```
-
-## Setup
-
-1. Set `jebHome` in `gradle.properties`, then build and deploy:
+## Install
 
 ```bash
-./gradlew build
-cp extension/build/libs/kfc-0.1.0.jar /path/to/jeb/coreplugins/
-cp kfc.py /path/to/jeb/coreplugins/
-cd server && bun install
+bun add -g @beriru/kfc
 ```
 
-2. Add a shell alias:
+Install the JEB side plugin:
 
 ```bash
-kfc() { /path/to/jeb/jeb_macos.sh -c --srv2 --script=/path/to/jeb/coreplugins/kfc.py; }
+kfc install --jeb-home /path/to/jeb
 ```
 
-3. Configure MCP in your AI client:
+Start the JEB bridge when you want agents to use JEB:
 
-**Cursor** — `.cursor/mcp.json`:
+```bash
+kfc bridge
+```
+
+Configure MCP in your AI client:
+
+**Codex**
+
+```bash
+codex mcp add kfc --env KFC_API_HOST=http://localhost:9527 -- kfc mcp
+```
+
+**Claude Code**
+
+```bash
+claude mcp add kfc --env KFC_API_HOST=http://localhost:9527 -- kfc mcp
+```
+
+**Cursor**
 
 ```json
 {
   "mcpServers": {
     "kfc": {
-      "command": "bun",
-      "args": ["/path/to/kfc/server/src/index.ts"],
+      "command": "kfc",
+      "args": ["mcp"],
       "env": { "KFC_API_HOST": "http://localhost:9527" }
     }
   }
 }
 ```
 
-**Claude Code:**
+You can print client-specific setup snippets:
 
 ```bash
-claude mcp add kfc -- bun /path/to/kfc/server/src/index.ts
+kfc config codex
+kfc config claude
+kfc config cursor
 ```
 
-**Codex:**
+Check local wiring:
 
 ```bash
-codex mcp add kfc --env KFC_API_HOST=http://localhost:9527 -- bun /path/to/kfc/server/src/index.ts
-codex mcp list
+kfc doctor
 ```
 
-4. Start the bridge, then let AI load the target:
+## Development
+
+From a checkout:
 
 ```bash
-kfc
+cd server && bun install
+bun run build:jeb
+bun run stage:jeb
+bun link
+```
+
+Publishing uses the normal NPM registry and token:
+
+```bash
+cd server
+bun publish --access public
 ```
 
 ## Tools
