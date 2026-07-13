@@ -13,7 +13,7 @@ use find_exported_components for the manifest attack surface, inspect_component 
 methods, search_bytecode/search_strings for sinks and constants, find_callers for xref callers, and
 decompile_method/decompile_class for final source-level evidence.
 `.trim();
-const server = new McpServer({ name: "kfc", version: "0.1.1" }, { instructions });
+const server = new McpServer({ name: "kfc", version: "0.1.2" }, { instructions });
 const xml = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "", parseTagValue: false, trimValues: true });
 const componentKinds = ["activity", "service", "receiver", "provider"] as const;
 
