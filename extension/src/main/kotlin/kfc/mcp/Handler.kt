@@ -35,12 +35,17 @@ import org.w3c.dom.NodeList
 sealed class Handler<In, Out>(
     private val read: (Map<String, String>) -> In,
     private val write: (Out) -> String,
+    private val targeted: Boolean = true,
 ) {
     protected abstract fun Ctx.execute(input: In): Out
 
-    fun handle(ctx: Ctx, queries: Map<String, String>) =
-        runCatching { write(with(this@Handler) { ctx.execute(read(queries)) }) }
+    fun handle(ctx: Ctx, queries: Map<String, String>) = synchronized(ctx) {
+        runCatching {
+            if (targeted) ctx.requireTarget(queries["target_path"])
+            write(with(this@Handler) { ctx.execute(read(queries)) })
+        }
             .getOrElse { err(it.message ?: "unknown") }
+    }
 
     class Adhoc(
         private val body: Ctx.(Map<String, String>) -> Map<String, JsonElement>,
@@ -64,29 +69,39 @@ sealed class Handler<In, Out>(
         fun <T> encode(serializer: KSerializer<T>) = { value: T -> json.encodeToString(serializer, value) }
     }
 
-    data object Load : Handler<String, Load.Out>({ it.required("path") }, encode(Out.serializer())) {
-        override fun Ctx.execute(input: String): Out {
-            val file = File(input).takeIf { it.isFile } ?: fail("File not found: $input")
+    data object Load : Handler<String?, Load.Out>({ it["path"] }, encode(Out.serializer()), false) {
+        override fun Ctx.execute(input: String?): Out {
             val previousPath = currentPath
-            val loadedProject = engine.loadProject("kfc-${file.nameWithoutExtension}").required("Failed to load project: ${file.absolutePath}")
+            unload()
+            val path = input.required("Missing 'path' parameter")
+            val file = File(path).canonicalFile.takeIf { it.isFile } ?: fail("File not found: $path")
+            val loadedProject = engine.createProject("kfc-${file.nameWithoutExtension}")
 
-            loadedProject.processArtifact(Artifact(file.name, FileInput(file)))
-            project = loadedProject
-            currentPath = file.absolutePath
-            units = loadedProject.liveArtifacts.orEmpty().flatMap { it.units.orEmpty() }.flatMap { it.all }
-            apk = units.filterIsInstance<IApkUnit>().firstOrNull()
-            dexes = units.filterIsInstance<IDexUnit>()
-            primaryDex = dexes.firstOrNull()
-            manifest = units.filterIsInstance<IXmlUnit>().firstOrNull { it.name.equals("AndroidManifest.xml", true) || it.name.equals("Manifest", true) }
+            try {
+                val artifact = loadedProject.processArtifact(Artifact(file.name, FileInput(file))).required("Failed to process artifact: ${file.absolutePath}")
+                val loadedUnits = artifact.units.orEmpty().flatMap { it.all }
+                val loadedDexes = loadedUnits.filterIsInstance<IDexUnit>()
 
-            println("[kfc] Loaded: ${file.absolutePath} (units=${units.size}, dex=${dexes.size})")
-            return Out(path = file.absolutePath, units = units.size, dexCount = dexes.size, previous = previousPath)
+                project = loadedProject
+                currentPath = file.absolutePath
+                units = loadedUnits
+                apk = loadedUnits.filterIsInstance<IApkUnit>().firstOrNull()
+                dexes = loadedDexes
+                primaryDex = loadedDexes.firstOrNull()
+                manifest = loadedUnits.filterIsInstance<IXmlUnit>().firstOrNull { it.name.equals("AndroidManifest.xml", true) || it.name.equals("Manifest", true) }
+
+                println("[kfc] Loaded: ${file.absolutePath} (units=${loadedUnits.size}, dex=${loadedDexes.size})")
+                return Out(path = file.absolutePath, units = loadedUnits.size, dexCount = loadedDexes.size, previous = previousPath)
+            } catch (error: Exception) {
+                unload()
+                throw error
+            }
         }
 
         @Serializable data class Out(val success: Boolean = true, val path: String, val units: Int, @SerialName("dex_count") val dexCount: Int, val previous: String? = null)
     }
 
-    data object Project : Handler<Unit, Project.Out>({ Unit }, encode(Out.serializer())) {
+    data object Project : Handler<Unit, Project.Out>({ Unit }, encode(Out.serializer()), false) {
         override fun Ctx.execute(input: Unit) = project?.let { loadedProject ->
             Out(
                 loaded = true,

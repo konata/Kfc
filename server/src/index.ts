@@ -13,9 +13,10 @@ use find_exported_components for the manifest attack surface, inspect_component 
 methods, search_bytecode/search_strings for sinks and constants, find_callers for xref callers, and
 decompile_method/decompile_class for final source-level evidence.
 `.trim();
-const server = new McpServer({ name: "kfc", version: "0.1.2" }, { instructions });
+const server = new McpServer({ name: "kfc", version: "0.1.6" }, { instructions });
 const xml = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "", parseTagValue: false, trimValues: true });
 const componentKinds = ["activity", "service", "receiver", "provider"] as const;
+let target: string | undefined;
 
 type Query = Record<string, string | number | undefined>;
 type Shape = z.ZodRawShape;
@@ -259,8 +260,10 @@ async function jeb(path: string, query: Query = {}) {
 }
 
 async function bridge(path: string, query: Query = {}) {
-  const value = parseJson(path, await jeb(path, query));
+  if (path === "/api/load") target = undefined;
+  const value = parseJson(path, await jeb(path, path === "/api/load" || path === "/api/meta/project" ? query : { ...query, target_path: target }));
   if (bridgeError(value)) throw new Error(value.error);
+  if (path === "/api/load") target = z.object({ path: z.string() }).parse(value).path;
   return value;
 }
 

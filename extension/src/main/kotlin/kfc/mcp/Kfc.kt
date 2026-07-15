@@ -11,6 +11,7 @@ import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.URLDecoder
 import java.util.concurrent.atomic.AtomicBoolean
@@ -49,7 +50,24 @@ data class Ctx(
     var dexes: List<IDexUnit> = emptyList(),
     var primaryDex: IDexUnit? = null,
     var manifest: IXmlUnit? = null,
-)
+) {
+    fun unload() {
+        project = null
+        currentPath = null
+        units = emptyList()
+        apk = null
+        dexes = emptyList()
+        primaryDex = null
+        manifest = null
+        engine.unloadProjects(true)
+    }
+
+    fun requireTarget(path: String?) {
+        val active = currentPath ?: fail("No project loaded. Use load_apk first.")
+        val requested = File(path.required("Missing 'target_path' parameter")).canonicalPath
+        if (requested != active) fail("TARGET_CHANGED: requested $requested, current $active")
+    }
+}
 
 object Kfc {
     fun start(engine: IEnginesContext, port: Int): (Int) -> Unit {
