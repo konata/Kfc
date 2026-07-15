@@ -5,6 +5,7 @@ build/
 *.log
 node_modules/
 bun.lock
+server/README.md
 
 .idea/
 *.iml

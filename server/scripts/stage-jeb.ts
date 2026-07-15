@@ -20,4 +20,5 @@ const jar = jars.at(-1) ?? fail("missing extension jar; run: bun run build:jeb")
 mkdirSync(out, { recursive: true });
 for (const name of readdirSync(out).filter((name) => /^kfc-.+\.jar$/.test(name))) rmSync(join(out, name));
 copyFileSync(join(libs, jar), join(out, basename(jar)));
-console.log(`staged ${jar} into ${out}`);
+copyFileSync(join(repo, "README.md"), join(server, "README.md"));
+console.log(`staged ${jar} and README.md into ${server}`);
