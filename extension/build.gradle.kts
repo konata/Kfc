@@ -26,7 +26,7 @@ kotlin {
 tasks.shadowJar {
     archiveBaseName.set("kfc")
     archiveClassifier.set("")
-    archiveVersion.set("0.1.4")
+    archiveVersion.set("0.1.5")
     mergeServiceFiles()
 }
 

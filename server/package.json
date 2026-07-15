@@ -1,7 +1,21 @@
 {
   "name": "@beriru/kfc",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "CLI and MCP bridge for using JEB static analysis from AI agents",
+  "keywords": [
+    "jeb",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "kfc",
+    "android",
+    "android-reverse-engineering",
+    "apk-analysis",
+    "reverse-engineering",
+    "static-analysis",
+    "decompiler",
+    "ai-agent"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/konata/Kfc.git"
