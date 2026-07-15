@@ -1,7 +1,6 @@
 package kfc.mcp
 
-import com.pnfsoftware.jeb.client.api.IClientContext
-import com.pnfsoftware.jeb.client.api.IScript
+import com.pnfsoftware.jeb.client.HeadlessClientContext
 import com.pnfsoftware.jeb.core.IEnginesContext
 import com.pnfsoftware.jeb.core.IRuntimeProject
 import com.pnfsoftware.jeb.core.units.IUnit
@@ -14,20 +13,30 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.net.InetSocketAddress
 import java.net.URLDecoder
+import java.util.concurrent.atomic.AtomicBoolean
 import kfc.mcp.Handler.*
 
-class Extension : IScript {
-    override fun run(ctx: IClientContext) {
-        val engine = ctx.enginesContext ?: return println("[kfc] ERROR: No engines context available.")
+object Main {
+    @JvmStatic
+    fun main(args: Array<String>) {
+        val jeb = HeadlessClientContext().apply {
+            initialize(args)
+            start()
+        }
         val port = System.getProperty("kfc.port", "9527").toIntOrNull() ?: 9527
         println("[kfc] Starting bridge on port $port ...")
-        val stop = Kfc.start(engine, port)
+        val stop = Kfc.start(requireNotNull(jeb.enginesContext), port)
+        val closed = AtomicBoolean()
+        val close = {
+            if (closed.compareAndSet(false, true)) {
+                stop(1)
+                jeb.stop()
+            }
+        }
+        Runtime.getRuntime().addShutdownHook(Thread({ close() }, "kfc-shutdown"))
         println("[kfc] Ready at http://localhost:$port")
         println("[kfc] Waiting for load_apk ...")
-        runCatching { Thread.currentThread().join() }.onFailure {
-            stop(1)
-            println("[kfc] Stopped.")
-        }
+        try { Thread.currentThread().join() } finally { close() }
     }
 }
 

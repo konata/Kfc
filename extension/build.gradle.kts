@@ -20,13 +20,13 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
 }
 
 tasks.shadowJar {
     archiveBaseName.set("kfc")
     archiveClassifier.set("")
-    archiveVersion.set("0.1.2")
+    archiveVersion.set("0.1.3")
     mergeServiceFiles()
 }
 

@@ -15,17 +15,20 @@ const caesar = function* (s) {
 bun add -g @beriru/kfc
 ```
 
-Install the JEB side plugin:
+Point KFC at your JEB installation. This only saves the path; KFC does not copy files into JEB:
 
 ```bash
-kfc install --jeb-home /path/to/jeb
+kfc use /path/to/jeb
 ```
 
-Start the JEB bridge when you want agents to use JEB:
+Start the headless JEB bridge when you want agents to use JEB:
 
 ```bash
 kfc bridge
 ```
+
+KFC starts JEB through its Java client API. It does not depend on JEB's Python script runner or graphical client.
+Keep `kfc bridge` running as the single long-lived JEB process. Every `kfc mcp` process connects to that bridge and never starts its own JEB instance.
 
 Configure MCP in your AI client:
 

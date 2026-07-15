@@ -3,8 +3,6 @@ build/
 *.class
 *.jar
 *.log
-server/jeb/kfc.py
-
 node_modules/
 bun.lock
 

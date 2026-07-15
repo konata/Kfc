@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
-import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 type Config = { jebHome?: string };
@@ -14,10 +14,10 @@ const repo = resolve(server, "..");
 const configFile = join(homedir(), ".config", "kfc", "config.json");
 const usage = `
 Usage:
-  kfc install --jeb-home <path>
-  kfc bridge [--jeb-home <path>] [--port 9527]
+  kfc use <jeb-home>
+  kfc bridge [--jeb-home <path>] [--java <path>] [--port 9527]
   kfc mcp [--host http://localhost:9527]
-  kfc doctor [--jeb-home <path>] [--host http://localhost:9527]
+  kfc doctor [--jeb-home <path>] [--java <path>] [--host http://localhost:9527]
   kfc config codex|cursor|claude
 `.trim();
 
@@ -38,41 +38,41 @@ const save = (config: Config) => {
   mkdirSync(dirname(configFile), { recursive: true });
   writeFileSync(configFile, `${JSON.stringify({ ...read(), ...config }, null, 2)}\n`);
 };
-const home = () => resolve(option("--jeb-home") ?? process.env.JEB_HOME ?? read().jebHome ?? die("Missing JEB home. Pass --jeb-home once or set JEB_HOME."));
+const home = () => resolve(option("--jeb-home") ?? process.env.JEB_HOME ?? read().jebHome ?? die("Missing JEB home. Run 'kfc use <jeb-home>', pass --jeb-home, or set JEB_HOME."));
 const file = (path: string) => existsSync(path) && statSync(path).isFile();
 const dir = (path: string) => existsSync(path) && statSync(path).isDirectory();
 const first = (paths: string[]) => paths.find(file);
-const script = () => first([join(server, "jeb", "kfc.py"), join(repo, "kfc.py")]) ?? die("Cannot find kfc.py. Build from a source checkout or package with jeb assets.");
-const jar = () => {
+const bridgeJar = () => {
   const dirs = [join(server, "jeb"), join(repo, "extension", "build", "libs")].filter(dir);
-  return dirs.flatMap((path) => readdirSync(path).filter((name) => /^kfc-.+\.jar$/.test(name)).map((name) => join(path, name))).sort().at(-1)
-    ?? die("Cannot find kfc jar. Run: cd server && bun run build:jeb");
+  return dirs.flatMap((path) => readdirSync(path).filter((name) => /^kfc-.+\.jar$/.test(name)).map((name) => join(path, name))).sort().at(-1);
 };
+const jar = () => bridgeJar() ?? die("Cannot find kfc jar. Run: cd server && bun run build:jeb");
+const java = (jeb: string) => option("--java") ?? first([
+  join(jeb, "bin", "runtime", "bin", "java"),
+  ...(process.env.JAVA_HOME ? [join(process.env.JAVA_HOME, "bin", "java")] : []),
+]) ?? "java";
 const bridgeHost = () => option("--host") ?? process.env.KFC_API_HOST ?? "http://localhost:9527";
 
-async function install() {
-  const jeb = home();
-  const core = join(jeb, "coreplugins");
-  if (!dir(core)) die(`Missing JEB coreplugins directory: ${core}`);
+function use() {
+  const jeb = resolve(args[0] ?? die("Missing JEB home. Usage: kfc use <jeb-home>"));
+  const core = join(jeb, "bin", "app", "jeb.jar");
+  if (!file(core)) die(`Missing JEB core jar: ${core}`);
 
-  for (const name of readdirSync(core).filter((name) => /^kfc-.+\.jar$/.test(name))) rmSync(join(core, name));
-  copyFileSync(script(), join(core, "kfc.py"));
-  copyFileSync(jar(), join(core, basename(jar())));
   save({ jebHome: jeb });
-  console.log(`Installed KFC into ${core}`);
+  console.log(`Configured KFC for JEB at ${jeb}`);
 }
 
 async function bridge() {
   const jeb = home();
-  const launcher = option("--jeb") ?? join(jeb, "jeb_macos.sh");
-  const script = join(jeb, "coreplugins", "kfc.py");
-  if (!file(launcher)) die(`Missing JEB launcher: ${launcher}`);
-  if (!file(script)) die(`Missing installed script: ${script}. Run: kfc install --jeb-home ${jeb}`);
+  const core = join(jeb, "bin", "app", "jeb.jar");
+  if (!file(core)) die(`Missing JEB core jar: ${core}`);
 
   const port = option("--port") ?? "9527";
-  const extra = `-Dkfc.port=${port}`;
-  const env = { ...process.env, JAVA_TOOL_OPTIONS: [process.env.JAVA_TOOL_OPTIONS, extra].filter(Boolean).join(" ") };
-  const child = spawn(launcher, ["-c", "--srv2", `--script=${script}`], { stdio: "inherit", env });
+  const child = spawn(java(jeb), [`-Dkfc.port=${port}`, "-cp", [join(jeb, "bin", "app", "*"), jar()].join(delimiter), "kfc.mcp.Main"], {
+    stdio: "inherit",
+    cwd: jeb,
+  });
+  child.on("error", (error) => die(`Cannot start JEB: ${error.message}`));
   child.on("exit", (code) => process.exit(code ?? 0));
 }
 
@@ -81,10 +81,11 @@ async function doctor() {
   console.log(`config: ${configFile}${file(configFile) ? "" : " (missing)"}`);
   console.log(`jeb: ${jeb ?? "(unset)"}`);
   if (jeb) {
-    console.log(`launcher: ${file(join(jeb, "jeb_macos.sh")) ? "ok" : "missing"}`);
-    console.log(`plugin script: ${file(join(jeb, "coreplugins", "kfc.py")) ? "ok" : "missing"}`);
-    console.log(`plugin jar: ${dir(join(jeb, "coreplugins")) && readdirSync(join(jeb, "coreplugins")).some((name) => /^kfc-.+\.jar$/.test(name)) ? "ok" : "missing"}`);
+    const executable = java(jeb);
+    console.log(`JEB core: ${file(join(jeb, "bin", "app", "jeb.jar")) ? "ok" : "missing"}`);
+    console.log(`Java: ${spawnSync(executable, ["-version"], { stdio: "ignore" }).status === 0 ? "ok" : `missing (${executable})`}`);
   }
+  console.log(`KFC bridge jar: ${bridgeJar() ? "ok" : "missing"}`);
   try {
     const res = await fetch(new URL("/api/health", bridgeHost()));
     console.log(`bridge: ${res.ok ? "ok" : `http ${res.status}`}`);
@@ -107,7 +108,7 @@ async function mcp() {
   await import("./index.ts");
 }
 
-if (command === "install") await install();
+if (command === "use") use();
 else if (command === "bridge") await bridge();
 else if (command === "mcp") await mcp();
 else if (command === "doctor") await doctor();
